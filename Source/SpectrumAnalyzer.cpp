@@ -496,7 +496,22 @@ void SpectrumAnalyzer::buildStatic()
 
         case Waveform:
         {
-            const float cy = std::round (plot.getCentreY()), half = plot.getHeight() * 0.46f;
+            // night-sky backdrop with soft out-of-focus lights (static, so it costs nothing per frame)
+            g.setGradientFill (juce::ColourGradient (juce::Colour (0xff070a14), 0.0f, plot.getY(),
+                                                     juce::Colour (0xff02030a), 0.0f, plot.getBottom(), false));
+            g.fillRect (plot);
+            juce::Random rnd (11);
+            for (int k = 0; k < 22; ++k)
+            {
+                const float bx = plot.getX() + rnd.nextFloat() * plot.getWidth();
+                const float by = plot.getY() + plot.getHeight() * (0.25f + 0.5f * rnd.nextFloat());
+                const float br = 3.0f + rnd.nextFloat() * 9.0f;
+                const auto bc = (rnd.nextFloat() < 0.5f ? juce::Colour (0xffff9a3c) : juce::Colour (0xff4aa8ff))
+                                    .withAlpha (0.04f + rnd.nextFloat() * 0.07f);
+                g.setGradientFill (juce::ColourGradient (bc, bx, by, bc.withAlpha (0.0f), bx + br, by, true));
+                g.fillEllipse (bx - br, by - br, br * 2.0f, br * 2.0f);
+            }
+            const float cy = std::round (plot.getCentreY()), half = plot.getHeight() * 0.47f;
             for (float a : { 0.5f, -0.5f })   // -6 dB guides
             {
                 g.setColour (juce::Colours::white.withAlpha (0.05f));
@@ -693,6 +708,22 @@ void SpectrumAnalyzer::drawCloud (juce::Graphics& g)
     drawHover (g, outAvg);
 }
 
+namespace
+{
+// Waveform palette, from the kick up to the air band
+const juce::Colour kWaveKick     { 0xff1d0729 };   // dark purple, almost black
+const juce::Colour kWaveKickRim  { 0xff6a2a92 };   // violet edge so the kick reads against the dark
+const juce::Colour kWaveBands[5] = {
+    juce::Colour (0xff3a9bff),   //    20 -   200 Hz  blue
+    juce::Colour (0xffb3127c),   //   200 -  1000 Hz  deep magenta
+    juce::Colour (0xffff8a24),   //  1000 -  6000 Hz  bright warm orange
+    juce::Colour (0xffffc21a),   //  6000 - 10000 Hz  deep warm yellow
+    juce::Colour (0xfff6f8ff)    // 10000 - 20000 Hz  white
+};
+// higher bands carry far less energy; lift them so their detail shows
+const float kWaveGain[5] = { 1.15f, 1.3f, 1.55f, 1.9f, 2.2f };
+} // namespace
+
 void SpectrumAnalyzer::feedWaveform()
 {
     const double srate = proc.getSampleRate() > 0.0 ? proc.getSampleRate() : 44100.0;
@@ -712,46 +743,107 @@ void SpectrumAnalyzer::feedWaveform()
     proc.copyAnalyserDataEndingAt (waveBuf.data(), n, pos, false);
 
     const int samplesPerCol = juce::jmax (1, (int) std::round (srate / (double) wavePxPerSec));
-    const float a1 = std::exp (-juce::MathConstants<float>::twoPi * 200.0f  / (float) srate);
-    const float a2 = std::exp (-juce::MathConstants<float>::twoPi * 2500.0f / (float) srate);
+    auto pole = [srate] (float hz) { return std::exp (-juce::MathConstants<float>::twoPi * hz / (float) srate); };
+    const float c[4] = { pole (200.0f), pole (1000.0f), pole (6000.0f), pole (10000.0f) };
+    const float kFastA = pole (1.0f / (0.001f * juce::MathConstants<float>::twoPi)),    // ~1 ms
+                kFastR = pole (1.0f / (0.030f * juce::MathConstants<float>::twoPi)),    // ~30 ms
+                kSlowA = pole (1.0f / (0.060f * juce::MathConstants<float>::twoPi)),    // ~60 ms
+                kSlowR = pole (1.0f / (0.300f * juce::MathConstants<float>::twoPi));    // ~300 ms
 
-    const juce::Colour lowCol (0xffff2d55), midCol (0xff2fe08c), hiCol (0xff3ba7ff);
-    const float cy = (float) h * 0.5f, half = (float) h * 0.46f;
+    const float cy = (float) h * 0.5f, half = (float) h * 0.47f;
+    const float kHoldDecay = std::exp (-1.0f / ((float) srate * 0.10f));
 
     for (int i = 0; i < n; ++i)
     {
         const float x = waveBuf[(size_t) i];
-        waveLp1 = x + a1 * (waveLp1 - x);
-        waveLp2 = x + a2 * (waveLp2 - x);
-        const float lo = waveLp1, mid = waveLp2 - waveLp1, hi = x - waveLp2;
+
+        // 4 splits, each two cascaded one-pole low-passes
+        float lp[4];
+        for (int k = 0; k < 4; ++k)
+        {
+            auto& s1 = waveLp[(size_t) (k * 2)];
+            auto& s2 = waveLp[(size_t) (k * 2 + 1)];
+            s1 = x  + c[k] * (s1 - x);
+            s2 = s1 + c[k] * (s2 - s1);
+            lp[k] = s2;
+        }
+        const float band[5] = { lp[0], lp[1] - lp[0], lp[2] - lp[1], lp[3] - lp[2], x - lp[3] };
+        for (size_t k = 0; k < 5; ++k)
+            wBand[k] += band[k] * band[k];
+
+        // kick = a sharp attack in the low band (fast envelope jumping well above the slow one)
+        const float lo = std::abs (band[0]);
+        kickFast = lo + (lo > kickFast ? kFastA : kFastR) * (kickFast - lo);
+        kickSlow = lo + (lo > kickSlow ? kSlowA : kSlowR) * (kickSlow - lo);
+        const float kickness = juce::jlimit (0.0f, 1.0f, (kickFast - 1.25f * kickSlow) / (kickFast + 1.0e-6f) * 3.0f);
+        // hold the hit through the body of the drum (~100 ms) so each kick reads as a solid shape
+        kickHold = std::max (kickness * kickFast, kickHold * kHoldDecay);
+        wKick = std::max (wKick, std::min (kickHold, kickFast));
         wPeak = std::max (wPeak, std::abs (x));
-        wSq += x * x;
-        wLo += lo * lo; wMid += mid * mid; wHi += hi * hi;
 
         if (++waveColCount < samplesPerCol)
             continue;
 
-        // one finished column: scroll left a pixel and draw it at the right edge
-        const float rms = std::sqrt (wSq / (float) samplesPerCol);
-        const float l = std::sqrt (wLo), m = std::sqrt (wMid), hgh = std::sqrt (wHi) * 1.6f;
-        const float sum = l + m + hgh + 1.0e-9f;
-        const float r = (lowCol.getFloatRed()   * l + midCol.getFloatRed()   * m + hiCol.getFloatRed()   * hgh) / sum;
-        const float gg = (lowCol.getFloatGreen() * l + midCol.getFloatGreen() * m + hiCol.getFloatGreen() * hgh) / sum;
-        const float bb = (lowCol.getFloatBlue()  * l + midCol.getFloatBlue()  * m + hiCol.getFloatBlue()  * hgh) / sum;
-        const auto col = juce::Colour::fromFloatRGBA (r, gg, bb, 1.0f).withMultipliedSaturation (1.15f).brighter (0.2f);
-
+        // ---- one finished column: scroll left a pixel and paint it at the right edge
         waveImg.moveImageSection (0, 0, 1, 0, w - 1, h);
         waveImg.clear ({ w - 1, 0, 1, h });
         juce::Graphics g (waveImg);
-        const float pk = juce::jmin (1.0f, wPeak) * half;
-        const float rm = juce::jmin (1.0f, rms * 1.41f) * half;
-        g.setColour (col.withAlpha (0.55f));
-        g.fillRect ((float) (w - 1), cy - pk, 1.0f, pk * 2.0f + 1.0f);
-        g.setColour (col.brighter (0.45f));
-        g.fillRect ((float) (w - 1), cy - rm, 1.0f, rm * 2.0f + 1.0f);
+        const float xc = (float) (w - 1);
+
+        auto heightOf = [&] (float amp) { return half * std::pow (juce::jlimit (0.0f, 1.0f, amp), 0.72f); };
+
+        // draws one band as a mirrored streak: bright core, soft tip, dimmer reflection below the horizon
+        auto layer = [&] (float hgt, juce::Colour col, float alpha)
+        {
+            if (hgt < 0.5f) return;
+            const float core = hgt * 0.78f;
+            g.setColour (col.withAlpha (alpha * 0.40f));                 // soft tip (upper)
+            g.fillRect (xc, cy - hgt, 1.0f, hgt - core);
+            g.setColour (col.withAlpha (alpha));                         // core (upper)
+            g.fillRect (xc, cy - core, 1.0f, core);
+            if (hgt > 3.0f)
+            {
+                g.setColour (col.brighter (0.55f).withAlpha (alpha * 0.9f));   // crisp contour at the crest
+                g.fillRect (xc, std::round (cy - hgt), 1.0f, 1.0f);
+            }
+            const float rh = hgt * 0.82f, rcore = core * 0.82f;          // reflection
+            g.setColour (col.withAlpha (alpha * 0.45f));
+            g.fillRect (xc, cy, 1.0f, rcore);
+            g.setColour (col.withAlpha (alpha * 0.16f));
+            g.fillRect (xc, cy + rcore, 1.0f, rh - rcore);
+        };
+
+        // faint full-signal outline frames the shape
+        layer (heightOf (wPeak), juce::Colour (0xff8fa6c8), 0.16f);
+
+        // bands from the widest (bass) to the narrowest (air), so the bright highs sit on top at the centre
+        const float rmsBand0 = std::sqrt (wBand[0] / (float) samplesPerCol) * 1.41f * kWaveGain[0];
+        layer (heightOf (rmsBand0), kWaveBands[0], 0.92f);
+
+        // kick hits: a deep purple, almost black body inside the blue, outlined in violet
+        if (wKick > 0.01f)
+        {
+            const float kh = heightOf (wKick * 1.3f);
+            const float a = juce::jlimit (0.0f, 1.0f, wKick * 4.0f);
+            g.setColour (kWaveKickRim.withAlpha (0.85f * a));
+            g.fillRect (xc, cy - kh - 1.5f, 1.0f, 2.0f);
+            g.fillRect (xc, cy + kh * 0.82f - 0.5f, 1.0f, 2.0f);
+            g.setColour (kWaveKick.withAlpha (0.92f * a));
+            g.fillRect (xc, cy - kh, 1.0f, kh);
+            g.setColour (kWaveKick.withAlpha (0.70f * a));
+            g.fillRect (xc, cy, 1.0f, kh * 0.82f);
+        }
+
+        const float alphas[5] = { 0.80f, 0.85f, 0.90f, 0.95f, 1.0f };
+        for (size_t k = 1; k < 5; ++k)
+        {
+            const float rms = std::sqrt (wBand[k] / (float) samplesPerCol) * 1.41f * kWaveGain[k];
+            layer (heightOf (rms), kWaveBands[k], alphas[k]);
+        }
 
         waveColCount = 0;
-        wPeak = wSq = wLo = wMid = wHi = 0.0f;
+        wPeak = wKick = 0.0f;
+        wBand.fill (0.0f);
     }
 }
 
@@ -760,10 +852,20 @@ void SpectrumAnalyzer::drawWaveform (juce::Graphics& g)
     if (waveImg.isValid())
         g.drawImageAt (waveImg, (int) plot.getX(), (int) plot.getY());
 
-    // centre line and a glowing "now" playhead at the right edge
+    // glowing horizon: warm white-hot core fading to orange and then to blue at the edges
     const float cy = std::round (plot.getCentreY());
-    g.setColour (juce::Colours::white.withAlpha (0.18f));
+    juce::ColourGradient hz (juce::Colour (0xff2e8bff).withAlpha (0.0f), plot.getX(), cy,
+                             juce::Colour (0xff2e8bff).withAlpha (0.0f), plot.getRight(), cy, false);
+    hz.addColour (0.20, juce::Colour (0xffff8a24).withAlpha (0.35f));
+    hz.addColour (0.45, juce::Colour (0xfffff1d6).withAlpha (0.55f));
+    hz.addColour (0.75, juce::Colour (0xff6fc3ff).withAlpha (0.35f));
+    g.setGradientFill (hz);
+    g.fillRect (plot.getX(), cy - 3.0f, plot.getWidth(), 7.0f);
+    hz.multiplyOpacity (1.8f);
+    g.setGradientFill (hz);
     g.fillRect (plot.getX(), cy, plot.getWidth(), 1.0f);
+
+    // "now" playhead at the right edge
     const float x = plot.getRight() - 1.0f;
     g.setColour (accent.withAlpha (0.25f));
     g.fillRect (x - 3.0f, plot.getY(), 6.0f, plot.getHeight());
