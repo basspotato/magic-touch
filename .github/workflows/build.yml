@@ -1,0 +1,32 @@
+name: Build Magic Touch VST3
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        shell: bash
+        run: |
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+            cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+          else
+            cmake -B build -DCMAKE_BUILD_TYPE=Release
+          fi
+
+      - name: Build VST3
+        run: cmake --build build --config Release --target MagicTouch_VST3 --parallel
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MagicTouch-VST3-${{ matrix.os }}
+          path: build/MagicTouch_artefacts/Release/VST3/
