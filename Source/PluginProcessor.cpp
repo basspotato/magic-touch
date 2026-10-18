@@ -222,6 +222,14 @@ void MagicTouchProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     ringPos.store (0);
 }
 
+void MagicTouchProcessor::copyAnalyserDataEndingAt (float* dest, int n, int endPos, bool input) const
+{
+    const auto& ring = input ? ringIn : ringOut;
+    n = juce::jmin (n, ringSize);
+    for (int i = 0; i < n; ++i)
+        dest[i] = ring[(size_t) ((endPos - n + i) & (ringSize - 1))];
+}
+
 void MagicTouchProcessor::copyAnalyserData (float* dest, int n, bool input) const
 {
     const auto& ring = input ? ringIn : ringOut;

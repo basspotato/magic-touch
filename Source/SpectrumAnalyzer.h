@@ -5,7 +5,7 @@
 //   Classic        - filled 1/6-octave spectrum + peak hold + input overlay, hover readout
 //   3D Waterfall   - perspective landscape of recent spectra in a fire palette
 //   Spectral Cloud - smoky persistence trails with a thin average line, mint on graphite
-//   Prism          - mirrored rainbow bars with reflections and light streaks
+//   Waveform       - the song scrolling past as a waveform, coloured by its low/mid/high content
 //   Spectrogram    - scrolling time/frequency heat map (inferno palette)
 //   1/3-Octave RTA - 31 ISO bands as segmented LED columns with peak caps
 //
@@ -14,7 +14,7 @@
 class SpectrumAnalyzer : public juce::Component
 {
 public:
-    enum Mode { Classic = 0, Waterfall, Cloud, Prism, Spectrogram, Rta, NumModes };
+    enum Mode { Classic = 0, Waterfall, Cloud, Waveform, Spectrogram, Rta, NumModes };
     static const char* modeName (int m);
 
     explicit SpectrumAnalyzer (MagicTouchProcessor&);
@@ -38,7 +38,7 @@ private:
     static constexpr float topDb = 0.0f, botDb = -84.0f;
 
     static constexpr int wfRows = 32, wfCols = 80;
-    static constexpr int prismBars = 48;
+    static constexpr float wavePxPerSec = 60.0f;
     static constexpr int rtaBands = 31;
 
     void setMode (int m, bool remember);
@@ -51,7 +51,8 @@ private:
     void drawWaterfall   (juce::Graphics&);
     void renderWaterfall();
     void drawCloud       (juce::Graphics&);
-    void drawPrism       (juce::Graphics&);
+    void drawWaveform    (juce::Graphics&);
+    void feedWaveform();
     void drawSpectrogram (juce::Graphics&);
     void drawRta         (juce::Graphics&, bool staticPart);
     void drawHover       (juce::Graphics&, const std::array<float, numPoints>&);
@@ -83,7 +84,12 @@ private:
     int wfHead = 0, wfTick = 0;
     juce::Image cloudImg, sgImg, wfImg;
     std::array<juce::Colour, 256> fireLut, infernoLut;
-    std::array<float, prismBars> prism {};
+    // waveform: columns are emitted at a fixed rate from the samples that arrived since last frame
+    juce::Image waveImg;
+    std::vector<float> waveBuf = std::vector<float> (MagicTouchProcessor::ringSize);
+    int waveLastPos = -1, waveColCount = 0;
+    float waveLp1 = 0.0f, waveLp2 = 0.0f;               // band-split states (200 Hz / 2.5 kHz)
+    float wPeak = 0.0f, wSq = 0.0f, wLo = 0.0f, wMid = 0.0f, wHi = 0.0f;
     std::array<float, rtaBands> rta {}, rtaPeak {}, rtaHoldT {};
     std::array<std::pair<int, int>, rtaBands> rtaRange {};
 

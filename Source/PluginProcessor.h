@@ -69,6 +69,9 @@ public:
 
     // Copies the most recent n samples (mono sum) of the input or output into dest
     void copyAnalyserData (float* dest, int n, bool input) const;
+    // Write position of the analyser rings, and a copy of the n samples that end at endPos
+    int  getAnalyserWritePos() const { return ringPos.load (std::memory_order_acquire); }
+    void copyAnalyserDataEndingAt (float* dest, int n, int endPos, bool input) const;
 
     juce::AudioProcessorValueTreeState apvts;
 

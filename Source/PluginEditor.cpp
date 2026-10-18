@@ -21,8 +21,20 @@ const juce::Colour kFaderColours[10] =
     juce::Colour (0xffe8ecff)
 };
 
+void drawPanelTitle (juce::Graphics& g, juce::Rectangle<float> r, const juce::String& title, juce::Colour accent)
+{
+    const float ly = r.getY() + 16.0f, lx = r.getX() + 16.0f;
+    g.setColour (accent.withAlpha (0.25f));
+    g.fillEllipse (lx - 5.0f, ly - 5.0f, 10.0f, 10.0f);
+    g.setColour (accent.brighter (0.4f));
+    g.fillEllipse (lx - 2.5f, ly - 2.5f, 5.0f, 5.0f);
+    g.setColour (accent);
+    g.setFont (uiFont (11.0f, true).withExtraKerningFactor (0.2f));
+    g.drawText (title, (int) r.getX() + 26, (int) r.getY() + 8, 300, 16, juce::Justification::left, false);
+}
+
 void drawPanel (juce::Graphics& g, juce::Rectangle<float> r, const juce::String& title, juce::Colour accent,
-                juce::Colour base = juce::Colour (0xff12151f))
+                juce::Colour base = juce::Colour (0xff12151f), bool withTitle = true)
 {
     // recessed into the chassis: outer lip highlight, body, inner top shadow
     g.setColour (juce::Colours::white.withAlpha (0.05f));
@@ -44,15 +56,8 @@ void drawPanel (juce::Graphics& g, juce::Rectangle<float> r, const juce::String&
     g.setColour (juce::Colours::black.withAlpha (0.65f));
     g.drawRoundedRectangle (r.reduced (0.5f), 10.0f, 1.0f);
 
-    // title with a small status LED
-    const float ly = r.getY() + 16.0f, lx = r.getX() + 16.0f;
-    g.setColour (accent.withAlpha (0.25f));
-    g.fillEllipse (lx - 5.0f, ly - 5.0f, 10.0f, 10.0f);
-    g.setColour (accent.brighter (0.4f));
-    g.fillEllipse (lx - 2.5f, ly - 2.5f, 5.0f, 5.0f);
-    g.setColour (accent);
-    g.setFont (uiFont (11.0f, true).withExtraKerningFactor (0.2f));
-    g.drawText (title, (int) r.getX() + 26, (int) r.getY() + 8, 300, 16, juce::Justification::left, false);
+    if (withTitle)
+        drawPanelTitle (g, r, title, accent);
 }
 // level meter colour zones
 juce::Colour meterZone (float db)
@@ -220,6 +225,21 @@ MagicTouchEditor::MagicTouchEditor (MagicTouchProcessor& p)
 
     spec.fill (-120.0f);
 
+    for (auto& pt : particles)
+    {
+        pt.x = rng.nextFloat() * 1100.0f;
+        pt.y = rng.nextFloat() * 720.0f;
+        pt.speed = 0.15f + rng.nextFloat() * 0.6f;
+        pt.size = 1.5f + rng.nextFloat() * 3.0f;
+        pt.phase = rng.nextFloat() * 6.28f;
+    }
+
+    // controls keep a cached image of themselves and only re-render when they move,
+    // so the music-reactive background can refresh around them cheaply
+    for (auto& k : knobs)  k->setBufferedToImage (true);
+    for (auto& f : faders) f->setBufferedToImage (true);
+    outKnob.setBufferedToImage (true);
+
     setOpaque (true);
     setSize (1100, 720);
     lastTickMs = juce::Time::getMillisecondCounterHiRes();
@@ -266,6 +286,12 @@ void MagicTouchEditor::resized()
     bgDirty = true;
     displayGlass = {};
     eqCached.fill (99.0f);
+
+    // where the reactive glow is visible: everything except panel interiors and the static top-bar controls
+    gapRegion = juce::RectangleList<int> (getLocalBounds());
+    for (const auto& pr : { displayRect.toNearestInt(), analyzer.getBounds(), meterRect.toNearestInt(), tonePanel, dynPanel })
+        gapRegion.subtract (pr.reduced (3));
+
 
     {
         auto inner = tonePanel.reduced (8, 0).withTrimmedTop (30).withTrimmedBottom (6);
@@ -341,8 +367,20 @@ void MagicTouchEditor::timerCallback()
     const float hueTarget = 0.52f + 0.36f * level;
     hue += (hueTarget - hue) * (1.0f - std::exp (-dt / 0.65f));
 
+    const float frames = dt * 30.0f;   // particle motion was tuned at 30 fps
+    for (auto& pt : particles)
+    {
+        pt.y -= pt.speed * (0.4f + bass * 3.0f) * frames;
+        pt.phase += 0.05f * frames;
+        if (pt.y < -10.0f)
+        {
+            pt.y = (float) getHeight() + 10.0f;
+            pt.x = rng.nextFloat() * (float) getWidth();
+        }
+    }
+
     // push theme colours to the child components
-    const auto accent = themeIndex == 0 ? themeBase() : themeBase().brighter (0.18f * level);
+    const auto accent = liveAccent();
     analyzer.setAccent (accent);
     analyzer.setBaseColour (themeIndex == 0 ? juce::Colour (0xff12151f) : tinted (juce::Colour (0xff12151f), 0.05f));
     analyzer.update (dt);
@@ -371,7 +409,15 @@ void MagicTouchEditor::timerCallback()
         return;
     }
 
-    // ---- otherwise only the parts that move
+    // ---- the reactive glow, particles and titles behind/around the panels refresh at 15 fps;
+    //      the meters and displays at the full 30 fps
+    if ((++frameCount & 1) == 0)
+    {
+        for (const auto& gr : gapRegion)
+            repaint (gr);
+        repaint (tonePanel.withHeight (30));
+        repaint (dynPanel.withHeight (30));
+    }
     repaint (starRect);
     repaint (displayRect.toNearestInt());
     repaint (meterRect.toNearestInt());
@@ -403,6 +449,21 @@ juce::Colour MagicTouchEditor::themeBase() const
 {
     const auto argb = kThemes[themeIndex].argb;
     return argb == 0 ? juce::Colour::fromHSV (hue, 0.72f, 1.0f, 1.0f) : juce::Colour (argb);
+}
+
+juce::Colour MagicTouchEditor::liveAccent() const
+{
+    if (themeIndex == 0)
+        return themeBase();   // "Reactive": the hue sweeps across the spectrum with level
+
+    // every other theme reacts around its own colour: the hue leans warmer/cooler and the
+    // colour brightens and saturates as the music gets louder and the low end hits
+    const juce::Colour b (kThemes[themeIndex].argb);
+    float h = b.getHue() + 0.035f * level + 0.015f * bass;   // a gentle lean, the theme stays itself
+    h -= std::floor (h);
+    const float sat = juce::jlimit (0.0f, 1.0f, b.getSaturation() * (0.85f + 0.25f * level));
+    const float bri = juce::jlimit (0.0f, 1.0f, b.getBrightness() * (0.75f + 0.35f * level));
+    return juce::Colour::fromHSV (h, sat, bri, 1.0f).brighter (0.12f * level + 0.08f * bass);
 }
 
 juce::Colour MagicTouchEditor::tinted (juce::Colour c, float amount) const
@@ -526,13 +587,50 @@ void MagicTouchEditor::paint (juce::Graphics& g)
     if (bgDirty || background.getWidth() != getWidth() || background.getHeight() != getHeight())
         buildBackground();
 
-    g.drawImageAt (background, 0, 0);
-
-    const auto accent = themeIndex == 0 ? themeBase() : themeBase().brighter (0.18f * level);
+    const auto accent = liveAccent();
     const auto clip = g.getClipBounds();
 
-    if (clip.intersects (starRect) || clip.intersects (outValueRect))
-        drawTopBar (g, accent, false);
+    g.drawImageAt (background, 0, 0);
+
+    // music-reactive layer: glow, drifting motes and panel rim lights, drawn only in the gaps
+    // between panels (where they're visible), so it costs a fraction of a full-window effect
+    if (gapRegion.intersects (clip))
+    {
+        juce::Graphics::ScopedSaveState ss (g);
+        g.reduceClipRegion (gapRegion);
+
+        const auto c = displayRect.getCentre();
+        g.setGradientFill (juce::ColourGradient (accent.withAlpha (0.05f + 0.20f * level + 0.12f * bass), c.x, c.y,
+                                                 accent.withAlpha (0.0f), c.x + 700.0f, c.y + 300.0f, true));
+        g.fillRect (clip);
+
+        for (const auto& pt : particles)
+        {
+            const float a = (0.06f + 0.26f * bass + 0.10f * level) * (0.5f + 0.5f * std::sin (pt.phase));
+            g.setColour (accent.withAlpha (juce::jlimit (0.0f, 1.0f, a)));
+            g.fillEllipse (pt.x, pt.y, pt.size, pt.size);
+        }
+
+        const float rim = juce::jlimit (0.0f, 1.0f, 0.06f + 0.26f * level + 0.18f * bass);
+        for (const auto& pr : { displayRect, analyzer.getBounds().toFloat(), meterRect, tonePanel.toFloat(), dynPanel.toFloat() })
+        {
+            g.setColour (accent.withAlpha (rim * 0.25f));
+            g.drawRoundedRectangle (pr.expanded (2.5f), 12.5f, 3.0f);
+            g.setColour (accent.withAlpha (rim * 0.7f));
+            g.drawRoundedRectangle (pr.expanded (1.0f), 11.0f, 1.0f);
+        }
+    }
+
+    if (clip.intersects (tonePanel.withHeight (30)))
+        drawPanelTitle (g, tonePanel.toFloat(), "TONE  &  COLOUR", accent);
+    if (clip.intersects (dynPanel.withHeight (30)))
+        drawPanelTitle (g, dynPanel.toFloat(), "DYNAMICS  &  OUTPUT", accent);
+
+    if (clip.intersects (topBar.withY (0).withHeight (topBar.getBottom() + 4)))
+    {
+        drawTopBar (g, themeBase(), true);   // logo, preset box, theme selector (drawn over the glow)
+        drawTopBar (g, accent, false);       // pulsing star + output value
+    }
     if (clip.intersects (displayRect.toNearestInt()))
         drawDisplay (g, accent, false);
     if (clip.intersects (meterRect.toNearestInt()))
@@ -554,12 +652,11 @@ void MagicTouchEditor::buildBackground()
     g.setColour (themeBase().withAlpha (themeIndex == 0 ? 0.025f : 0.045f));
     g.fillAll();
 
-    drawTopBar (g, accent, true);
     drawDisplay (g, accent, true);
     drawMeters (g, accent, true);
 
-    drawPanel (g, tonePanel.toFloat(), "TONE  &  COLOUR", accent, panelBase);
-    drawPanel (g, dynPanel.toFloat(),  "DYNAMICS  &  OUTPUT", accent, panelBase);
+    drawPanel (g, tonePanel.toFloat(), "TONE  &  COLOUR", accent, panelBase, false);
+    drawPanel (g, dynPanel.toFloat(),  "DYNAMICS  &  OUTPUT", accent, panelBase, false);
 
     bgScHint = scButton.getToggleState() && ! proc.scConnected.load();
     if (bgScHint)
@@ -906,7 +1003,9 @@ void MagicTouchEditor::drawMeters (juce::Graphics& g, juce::Colour accent, bool 
 {
     const auto r = meterRect;
     if (staticPart)
-        drawPanel (g, r, "LEVELS", accent, tinted (juce::Colour (0xff12151f), 0.05f));
+        drawPanel (g, r, "LEVELS", accent, tinted (juce::Colour (0xff12151f), 0.05f), false);
+    else
+        drawPanelTitle (g, r, "LEVELS", accent);
 
     // ---- numeric readouts: output peak (max hold), momentary + short-term loudness
     {

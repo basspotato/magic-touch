@@ -27,7 +27,7 @@ const juce::Colour kCloudBg   { 0xff1a1c1f };
 
 const char* SpectrumAnalyzer::modeName (int m)
 {
-    static const char* names[] = { "Classic", "3D Waterfall", "Spectral Cloud", "Prism", "Spectrogram", "1/3-Octave RTA" };
+    static const char* names[] = { "Classic", "3D Waterfall", "Spectral Cloud", "Waveform", "Spectrogram", "1/3-Octave RTA" };
     return names[juce::jlimit (0, (int) NumModes - 1, m)];
 }
 
@@ -39,7 +39,6 @@ SpectrumAnalyzer::SpectrumAnalyzer (MagicTouchProcessor& p) : proc (p)
     slowAvg.fill (-120.0f);
     peakHoldT.fill (0.0f);
     for (auto& row : wf) row.fill (-120.0f);
-    prism.fill (0.0f);
     rta.fill (-120.0f);
     rtaPeak.fill (-120.0f);
     rtaHoldT.fill (0.0f);
@@ -80,6 +79,7 @@ void SpectrumAnalyzer::resized()
     cloudImg = {};
     sgImg = {};
     wfImg = {};
+    waveImg = {};
 }
 
 void SpectrumAnalyzer::setMode (int m, bool remember)
@@ -90,6 +90,8 @@ void SpectrumAnalyzer::setMode (int m, bool remember)
     staticDirty = true;
     cloudImg = {};
     sgImg = {};
+    waveImg = {};
+    waveLastPos = -1;
     repaint();
 }
 
@@ -255,18 +257,9 @@ void SpectrumAnalyzer::update (float dt)
             break;
         }
 
-        case Prism:
-        {
-            const float atk = 1.0f - std::exp (-dt / 0.03f), rel = 1.0f - std::exp (-dt / 0.18f);
-            for (int b = 0; b < prismBars; ++b)
-            {
-                const float t = ((float) b + 0.5f) / (float) prismBars;
-                const float lvl = juce::jlimit (0.0f, 1.0f, (valueAt (outAvg, t) + 78.0f) / 72.0f);
-                auto& v = prism[(size_t) b];
-                v += (lvl - v) * (lvl > v ? atk : rel);
-            }
+        case Waveform:
+            feedWaveform();
             break;
-        }
 
         case Spectrogram:
         {
@@ -399,7 +392,7 @@ void SpectrumAnalyzer::buildStatic()
     // panel background, per mode
     juce::Colour top = base.brighter (0.06f), bot = juce::Colour (0xff05060a);
     if (mode == Cloud)        { top = kCloudBg.brighter (0.05f); bot = kCloudBg.darker (0.4f); }
-    else if (mode == Prism)   { top = juce::Colour (0xff10122a); bot = juce::Colour (0xff04050c); }
+    else if (mode == Waveform) { top = juce::Colour (0xff0b0d14); bot = juce::Colour (0xff030407); }
     else if (mode == Waterfall) { top = juce::Colour (0xff0d0b14); bot = juce::Colour (0xff030306); }
     g.setGradientFill (juce::ColourGradient (top, 0.0f, b.getY(), bot, 0.0f, b.getBottom(), false));
     g.fillRoundedRectangle (b, 10.0f);
@@ -501,9 +494,30 @@ void SpectrumAnalyzer::buildStatic()
             break;
         }
 
-        case Prism:
-            freqLabels (0.25f);
+        case Waveform:
+        {
+            const float cy = std::round (plot.getCentreY()), half = plot.getHeight() * 0.46f;
+            for (float a : { 0.5f, -0.5f })   // -6 dB guides
+            {
+                g.setColour (juce::Colours::white.withAlpha (0.05f));
+                g.fillRect (plot.getX(), std::round (cy - a * half), plot.getWidth(), 1.0f);
+            }
+            g.setFont (uiFont (8.5f));
+            for (int sec = 0; sec <= 5; ++sec)   // time ruler, newest audio on the right
+            {
+                const float x = std::round (plot.getRight() - (float) sec * wavePxPerSec);
+                if (x < plot.getX()) break;
+                g.setColour (juce::Colours::white.withAlpha (0.06f));
+                g.fillRect (x, plot.getY(), 1.0f, plot.getHeight());
+                g.setColour (juce::Colours::white.withAlpha (0.35f));
+                g.drawText (sec == 0 ? juce::String ("NOW") : "-" + juce::String (sec) + "s", (int) x - 18, (int) plot.getBottom() + 4, 36, 12,
+                            juce::Justification::centred, false);
+            }
+            g.setColour (juce::Colours::white.withAlpha (0.30f));
+            g.drawText ("0 dB", (int) plot.getRight() + 2, (int) (cy - half) - 6, 28, 12, juce::Justification::centredLeft, false);
+            g.drawText ("-6",   (int) plot.getRight() + 2, (int) (cy - 0.5f * half) - 6, 28, 12, juce::Justification::centredLeft, false);
             break;
+        }
 
         case Spectrogram:
         {
@@ -549,7 +563,7 @@ void SpectrumAnalyzer::paint (juce::Graphics& g)
         case Classic:     drawClassic (g); break;
         case Waterfall:   drawWaterfall (g); break;
         case Cloud:       drawCloud (g); break;
-        case Prism:       drawPrism (g); break;
+        case Waveform:    drawWaveform (g); break;
         case Spectrogram: drawSpectrogram (g); break;
         case Rta:         drawRta (g, false); break;
         default: break;
@@ -679,44 +693,82 @@ void SpectrumAnalyzer::drawCloud (juce::Graphics& g)
     drawHover (g, outAvg);
 }
 
-void SpectrumAnalyzer::drawPrism (juce::Graphics& g)
+void SpectrumAnalyzer::feedWaveform()
 {
-    const float cy = std::round (plot.getCentreY()), half = plot.getHeight() * 0.46f;
-    const float pitch = plot.getWidth() / (float) prismBars;
-    const float bw = std::max (2.0f, pitch * 0.58f);
+    const double srate = proc.getSampleRate() > 0.0 ? proc.getSampleRate() : 44100.0;
+    const int w = juce::jmax (2, (int) plot.getWidth()), h = juce::jmax (2, (int) plot.getHeight());
+    if (waveImg.getWidth() != w || waveImg.getHeight() != h)
+        waveImg = juce::Image (juce::Image::ARGB, w, h, true);
 
-    for (int b = 0; b < prismBars; ++b)
+    // pull every sample that arrived since the last frame
+    const int pos = proc.getAnalyserWritePos();
+    if (waveLastPos < 0)
+        waveLastPos = pos;
+    int n = (pos - waveLastPos) & (MagicTouchProcessor::ringSize - 1);
+    waveLastPos = pos;
+    n = juce::jmin (n, MagicTouchProcessor::ringSize / 2);
+    if (n <= 0)
+        return;
+    proc.copyAnalyserDataEndingAt (waveBuf.data(), n, pos, false);
+
+    const int samplesPerCol = juce::jmax (1, (int) std::round (srate / (double) wavePxPerSec));
+    const float a1 = std::exp (-juce::MathConstants<float>::twoPi * 200.0f  / (float) srate);
+    const float a2 = std::exp (-juce::MathConstants<float>::twoPi * 2500.0f / (float) srate);
+
+    const juce::Colour lowCol (0xffff2d55), midCol (0xff2fe08c), hiCol (0xff3ba7ff);
+    const float cy = (float) h * 0.5f, half = (float) h * 0.46f;
+
+    for (int i = 0; i < n; ++i)
     {
-        const float t = ((float) b + 0.5f) / (float) prismBars;
-        const auto col = juce::Colour::fromHSV (0.60f * (1.0f - t), 0.78f, 1.0f, 1.0f);   // blue -> green -> yellow -> red
-        const float x = plot.getX() + (float) b * pitch + (pitch - bw) * 0.5f;
-        const float v = prism[(size_t) b];
-        const float hUp = std::max (1.0f, v * half);
+        const float x = waveBuf[(size_t) i];
+        waveLp1 = x + a1 * (waveLp1 - x);
+        waveLp2 = x + a2 * (waveLp2 - x);
+        const float lo = waveLp1, mid = waveLp2 - waveLp1, hi = x - waveLp2;
+        wPeak = std::max (wPeak, std::abs (x));
+        wSq += x * x;
+        wLo += lo * lo; wMid += mid * mid; wHi += hi * hi;
 
-        // soft vertical light streak behind each bar
-        g.setGradientFill (juce::ColourGradient (col.withAlpha (0.05f + 0.10f * v), 0.0f, cy,
-                                                 col.withAlpha (0.0f), 0.0f, plot.getY(), false));
-        g.fillRect (x - pitch * 0.2f, plot.getY(), bw + pitch * 0.4f, cy - plot.getY());
+        if (++waveColCount < samplesPerCol)
+            continue;
 
-        // bar above the line: hot white core at the centre fading to colour at the tip
-        g.setColour (col.withAlpha (0.22f));
-        g.fillRoundedRectangle (x - 2.0f, cy - hUp - 2.0f, bw + 4.0f, hUp + 2.0f, 3.0f);
-        juce::ColourGradient up (col.brighter (0.6f), 0.0f, cy, col, 0.0f, cy - hUp, false);
-        g.setGradientFill (up);
-        g.fillRoundedRectangle (x, cy - hUp, bw, hUp, bw * 0.5f);
+        // one finished column: scroll left a pixel and draw it at the right edge
+        const float rms = std::sqrt (wSq / (float) samplesPerCol);
+        const float l = std::sqrt (wLo), m = std::sqrt (wMid), hgh = std::sqrt (wHi) * 1.6f;
+        const float sum = l + m + hgh + 1.0e-9f;
+        const float r = (lowCol.getFloatRed()   * l + midCol.getFloatRed()   * m + hiCol.getFloatRed()   * hgh) / sum;
+        const float gg = (lowCol.getFloatGreen() * l + midCol.getFloatGreen() * m + hiCol.getFloatGreen() * hgh) / sum;
+        const float bb = (lowCol.getFloatBlue()  * l + midCol.getFloatBlue()  * m + hiCol.getFloatBlue()  * hgh) / sum;
+        const auto col = juce::Colour::fromFloatRGBA (r, gg, bb, 1.0f).withMultipliedSaturation (1.15f).brighter (0.2f);
 
-        // mirrored reflection below, fading out
-        const float hDn = hUp * 0.85f;
-        juce::ColourGradient dn (col.withAlpha (0.55f), 0.0f, cy, col.withAlpha (0.0f), 0.0f, cy + hDn, false);
-        g.setGradientFill (dn);
-        g.fillRoundedRectangle (x, cy, bw, hDn, bw * 0.5f);
+        waveImg.moveImageSection (0, 0, 1, 0, w - 1, h);
+        waveImg.clear ({ w - 1, 0, 1, h });
+        juce::Graphics g (waveImg);
+        const float pk = juce::jmin (1.0f, wPeak) * half;
+        const float rm = juce::jmin (1.0f, rms * 1.41f) * half;
+        g.setColour (col.withAlpha (0.55f));
+        g.fillRect ((float) (w - 1), cy - pk, 1.0f, pk * 2.0f + 1.0f);
+        g.setColour (col.brighter (0.45f));
+        g.fillRect ((float) (w - 1), cy - rm, 1.0f, rm * 2.0f + 1.0f);
+
+        waveColCount = 0;
+        wPeak = wSq = wLo = wMid = wHi = 0.0f;
     }
+}
 
-    // glowing horizon line
-    g.setColour (juce::Colours::white.withAlpha (0.12f));
-    g.fillRect (plot.getX(), cy - 2.0f, plot.getWidth(), 5.0f);
-    g.setColour (juce::Colours::white.withAlpha (0.65f));
+void SpectrumAnalyzer::drawWaveform (juce::Graphics& g)
+{
+    if (waveImg.isValid())
+        g.drawImageAt (waveImg, (int) plot.getX(), (int) plot.getY());
+
+    // centre line and a glowing "now" playhead at the right edge
+    const float cy = std::round (plot.getCentreY());
+    g.setColour (juce::Colours::white.withAlpha (0.18f));
     g.fillRect (plot.getX(), cy, plot.getWidth(), 1.0f);
+    const float x = plot.getRight() - 1.0f;
+    g.setColour (accent.withAlpha (0.25f));
+    g.fillRect (x - 3.0f, plot.getY(), 6.0f, plot.getHeight());
+    g.setColour (accent.brighter (0.6f));
+    g.fillRect (x, plot.getY(), 1.0f, plot.getHeight());
 }
 
 void SpectrumAnalyzer::drawSpectrogram (juce::Graphics& g)

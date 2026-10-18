@@ -65,6 +65,7 @@ public:
     void mouseDown (const juce::MouseEvent&) override;
 
 private:
+    struct Particle { float x, y, speed, size, phase; };
     struct MeterCh  { float peak = -90.0f, rms = -90.0f, hold = -90.0f, holdT = 0.0f; bool clip = false; };
 
     void timerCallback() override;
@@ -82,6 +83,7 @@ private:
     void setTheme (int index, bool saveAsDefault);
     juce::Colour themeBase() const;   // the theme colour (current hue for "Reactive")
     juce::Colour tinted (juce::Colour c, float amount) const;
+    juce::Colour liveAccent() const;  // theme colour reacting to the music (every theme)
 
     MagicTouchProcessor& proc;
     MT::MagicLookAndFeel laf;   // declared before the children so it outlives them
@@ -99,6 +101,8 @@ private:
 
     juce::Image chassis;      // brushed metal, bezel, screws
     juce::Image background;   // chassis + panels + labels + grids: everything that doesn't move
+    juce::RectangleList<int> gapRegion;   // where the music-reactive glow shows (between panels)
+    int frameCount = 0;
     juce::Image displayGlass; // glare/inner-shadow overlay for the EQ display
     bool bgDirty = true;
     int bgPreset = -2;
@@ -136,6 +140,8 @@ private:
 
     // reactive visuals
     float level = 0.0f, bass = 0.0f, hue = 0.52f;
+    std::array<Particle, 48> particles {};
+    juce::Random rng;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MagicTouchEditor)
 };
