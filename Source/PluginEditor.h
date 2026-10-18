@@ -73,6 +73,7 @@ private:
     void drawTopBar  (juce::Graphics&, juce::Colour accent);
     void drawDisplay (juce::Graphics&, juce::Colour accent);
     void drawMeters  (juce::Graphics&, juce::Colour accent);
+    void buildChassis();
     void stepPreset (int dir);
     void showPresetMenu();
     void showThemeMenu();
@@ -93,6 +94,8 @@ private:
     PillToggle scButton { "EXT SIDECHAIN" };
     juce::TooltipWindow tooltips { this, 500 };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> scAttachment;
+
+    juce::Image chassis;   // cached static background
 
     // themes
     int themeIndex = 0;

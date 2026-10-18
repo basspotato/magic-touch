@@ -15,6 +15,7 @@ public:
     void setBaseColour (juce::Colour c)     { base = c; }
 
     void paint (juce::Graphics&) override;
+    void paintOverChildren (juce::Graphics&) override;
     void resized() override;
     void mouseMove (const juce::MouseEvent&) override;
     void mouseExit (const juce::MouseEvent&) override;

@@ -172,12 +172,14 @@ void SpectrumAnalyzer::paint (juce::Graphics& g)
     g.setGradientFill (juce::ColourGradient (base.brighter (0.06f), 0.0f, b.getY(),
                                              juce::Colour (0xff05060a), 0.0f, b.getBottom(), false));
     g.fillRoundedRectangle (b, 10.0f);
-    g.setColour (juce::Colours::white.withAlpha (0.07f));
-    g.drawRoundedRectangle (b.reduced (0.5f), 10.0f, 1.0f);
 
+    g.setColour (accent.withAlpha (0.25f));
+    g.fillEllipse (b.getX() + 11.0f, b.getY() + 11.0f, 10.0f, 10.0f);
+    g.setColour (accent.brighter (0.4f));
+    g.fillEllipse (b.getX() + 13.5f, b.getY() + 13.5f, 5.0f, 5.0f);
     g.setColour (accent);
     g.setFont (uiFont (11.0f, true).withExtraKerningFactor (0.2f));
-    g.drawText ("ANALYZER", (int) b.getX() + 14, (int) b.getY() + 8, 120, 16, juce::Justification::left, false);
+    g.drawText ("ANALYZER", (int) b.getX() + 26, (int) b.getY() + 8, 120, 16, juce::Justification::left, false);
 
     // legend: IN (click to toggle) / OUT / PEAK
     {
@@ -285,6 +287,11 @@ void SpectrumAnalyzer::paint (juce::Graphics& g)
         g.setFont (uiFont (9.5f, true));
         g.drawText (txt, box.toNearestInt(), juce::Justification::centred, false);
     }
+}
+
+void SpectrumAnalyzer::paintOverChildren (juce::Graphics& g)
+{
+    MT::drawGlass (g, getLocalBounds().toFloat(), 10.0f);
 }
 
 //==============================================================================

@@ -5,6 +5,19 @@ Signal chain (all stereo, ~1.5 ms look-ahead latency, reported to the host):
 EQ (4 bands) -> Tube -> Tape -> Exciter -> Transient "Punch" -> Glue Compressor
 -> M/S Width + Bass Mono -> Loudness push -> Look-ahead brick-wall Limiter -> Dry/Wet
 
+## Engine
+- The whole colour and dynamics chain runs **4x oversampled** (polyphase IIR half-band filters),
+  so saturation harmonics don't alias back into the audible range and the EQ has no cramping
+  near Nyquist (the Air shelf matches its analogue curve).
+- The limiter works at the oversampled rate, so it catches **inter-sample (true) peaks**:
+  with the ceiling at -1 dB the output measures -1.0 dBTP.
+- Tube: asymmetric triode-style curve with level-dependent bias (mostly 2nd harmonic).
+  Tape: head bump, HF pre/de-emphasis around the saturator, drive-dependent gap loss.
+- Glue compressor: smooth decoupled dB-domain ballistics with a program-dependent slow branch.
+- Bass Mono: phase-coherent Linkwitz-Riley 4 split.
+- EQ and tape coefficients are smoothed and updated in place (no zipper noise, no allocation
+  on the audio thread). Dry/wet stays sample-aligned with the processed signal.
+
 ## 10 knobs (Tone & Colour)
 Bass, Body, Presence, Air, Tube, Tape, Exciter, Width, Bass Mono, Punch
 
