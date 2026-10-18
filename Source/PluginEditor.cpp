@@ -15,8 +15,8 @@ const juce::Colour kKnobColours[10] =
 
 const juce::Colour kFaderColours[10] =
 {
-    juce::Colour (0xff2ee6a6), juce::Colour (0xff2ee6a6), juce::Colour (0xff2ee6a6), juce::Colour (0xff2ee6a6),
-    juce::Colour (0xff2ee6a6), juce::Colour (0xff2ee6a6),
+    juce::Colour (0xffffc93c), juce::Colour (0xffffc93c), juce::Colour (0xffffc93c), juce::Colour (0xffffc93c),
+    juce::Colour (0xffffc93c), juce::Colour (0xffffc93c),
     juce::Colour (0xffff4d7d), juce::Colour (0xffff4d7d), juce::Colour (0xffff4d7d),
     juce::Colour (0xffe8ecff)
 };
@@ -220,18 +220,10 @@ MagicTouchEditor::MagicTouchEditor (MagicTouchProcessor& p)
 
     spec.fill (-120.0f);
 
-    for (auto& pt : particles)
-    {
-        pt.x = rng.nextFloat() * 1100.0f;
-        pt.y = rng.nextFloat() * 720.0f;
-        pt.speed = 0.15f + rng.nextFloat() * 0.6f;
-        pt.size = 1.5f + rng.nextFloat() * 3.0f;
-        pt.phase = rng.nextFloat() * 6.28f;
-    }
-
+    setOpaque (true);
     setSize (1100, 720);
     lastTickMs = juce::Time::getMillisecondCounterHiRes();
-    startTimerHz (60);
+    startTimerHz (30);   // meters/displays refresh; static parts are cached, so each frame is cheap
 }
 
 MagicTouchEditor::~MagicTouchEditor()
@@ -268,6 +260,12 @@ void MagicTouchEditor::resized()
     outTextRect = juce::Rectangle<int> (topBar.getRight() - 188, topBar.getY() + 4, 118, 40);
     outKnob.setBounds (topBar.getRight() - 66, topBar.getY() - 6, 60, 60);
     scButton.setBounds (dynPanel.getRight() - 150, dynPanel.getY() + 6, 138, 20);
+    starRect     = { 12, 16, 46, 46 };
+    outValueRect = outTextRect.withTrimmedTop (18);
+    scHintRect   = { scButton.getX() - 130, scButton.getY(), 122, scButton.getHeight() };
+    bgDirty = true;
+    displayGlass = {};
+    eqCached.fill (99.0f);
 
     {
         auto inner = tonePanel.reduced (8, 0).withTrimmedTop (30).withTrimmedBottom (6);
@@ -314,6 +312,12 @@ void MagicTouchEditor::timerCallback()
     const float scDb = juce::Decibels::gainToDecibels (proc.scPeak.exchange (0.0f), -90.0f);
     scLevel = scDb > scLevel ? scDb : std::max (scDb, scLevel - 26.0f * dt);
 
+    {
+        const float rl = proc.outRmsL.load(), rr = proc.outRmsR.load();
+        const float rdb = 10.0f * std::log10 (0.5f * (rl * rl + rr * rr) + 1.0e-12f);
+        rmsOut += (juce::jmax (-90.0f, rdb) - rmsOut) * (1.0f - std::exp (-dt / 0.06f));
+    }
+
     const float outNow = std::max (mtr[2].peak, mtr[3].peak);
     outMax = std::max (outMax, outNow);
     const float lk = 1.0f - std::exp (-dt / 0.08f);
@@ -337,22 +341,10 @@ void MagicTouchEditor::timerCallback()
     const float hueTarget = 0.52f + 0.36f * level;
     hue += (hueTarget - hue) * (1.0f - std::exp (-dt / 0.65f));
 
-    const float frames = dt * 30.0f;   // particle motion was tuned at 30 fps
-    for (auto& pt : particles)
-    {
-        pt.y -= pt.speed * (0.4f + bass * 3.0f) * frames;
-        pt.phase += 0.05f * frames;
-        if (pt.y < -10.0f)
-        {
-            pt.y = (float) getHeight() + 10.0f;
-            pt.x = rng.nextFloat() * (float) getWidth();
-        }
-    }
-
     // push theme colours to the child components
     const auto accent = themeIndex == 0 ? themeBase() : themeBase().brighter (0.18f * level);
     analyzer.setAccent (accent);
-    analyzer.setBaseColour (tinted (juce::Colour (0xff12151f), 0.05f));
+    analyzer.setBaseColour (themeIndex == 0 ? juce::Colour (0xff12151f) : tinted (juce::Colour (0xff12151f), 0.05f));
     analyzer.update (dt);
 
     if (outKnob.findColour (juce::Slider::rotarySliderFillColourId) != themeBase())
@@ -366,7 +358,28 @@ void MagicTouchEditor::timerCallback()
     else
         scButton.setLed (kFaderColours[0].withAlpha (juce::jmap (juce::jlimit (-60.0f, 0.0f, scLevel), -60.0f, 0.0f, 0.35f, 1.0f)));
 
-    repaint();
+    // ---- does the cached static layer need rebuilding?
+    const bool scHint = scButton.getToggleState() && ! proc.scConnected.load();
+    if (proc.getCurrentPreset() != bgPreset || scHint != bgScHint)
+        bgDirty = true;
+    if (themeIndex == 0 && std::abs (hue - bgHue) > 0.02f && now - lastBgBuildMs > 500.0)
+        bgDirty = true;   // "Reactive" theme: refresh titles as the hue drifts, at most twice a second
+
+    if (bgDirty)
+    {
+        repaint();
+        return;
+    }
+
+    // ---- otherwise only the parts that move
+    repaint (starRect);
+    repaint (displayRect.toNearestInt());
+    repaint (meterRect.toNearestInt());
+    if (std::abs (outKnob.getValue() - lastOutValue) > 1.0e-6)
+    {
+        lastOutValue = outKnob.getValue();
+        repaint (outValueRect);
+    }
 }
 
 void MagicTouchEditor::updateSpectrum (float dt)
@@ -411,6 +424,7 @@ void MagicTouchEditor::setTheme (int index, bool saveAsDefault)
     const auto c = kThemes[themeIndex].argb == 0 ? juce::Colour (0xff2a3350)
                                                  : juce::Colour (0xff10131c).interpolatedWith (juce::Colour (kThemes[themeIndex].argb), 0.35f);
     laf.setColour (juce::PopupMenu::highlightedBackgroundColourId, c);
+    bgDirty = true;
     repaint();
 }
 
@@ -509,45 +523,50 @@ void MagicTouchEditor::buildChassis()
 //==============================================================================
 void MagicTouchEditor::paint (juce::Graphics& g)
 {
+    if (bgDirty || background.getWidth() != getWidth() || background.getHeight() != getHeight())
+        buildBackground();
+
+    g.drawImageAt (background, 0, 0);
+
     const auto accent = themeIndex == 0 ? themeBase() : themeBase().brighter (0.18f * level);
+    const auto clip = g.getClipBounds();
+
+    if (clip.intersects (starRect) || clip.intersects (outValueRect))
+        drawTopBar (g, accent, false);
+    if (clip.intersects (displayRect.toNearestInt()))
+        drawDisplay (g, accent, false);
+    if (clip.intersects (meterRect.toNearestInt()))
+        drawMeters (g, accent, false);
+}
+
+void MagicTouchEditor::buildBackground()
+{
+    const int w = juce::jmax (1, getWidth()), h = juce::jmax (1, getHeight());
+    if (chassis.getWidth() != w || chassis.getHeight() != h)
+        buildChassis();
+
+    background = juce::Image (juce::Image::RGB, w, h, false);
+    juce::Graphics g (background);
+    const auto accent = themeBase();
     const auto panelBase = tinted (juce::Colour (0xff12151f), 0.05f);
 
-    // hardware chassis (cached), lightly tinted by the theme
-    if (chassis.getWidth() != getWidth() || chassis.getHeight() != getHeight())
-        buildChassis();
     g.drawImageAt (chassis, 0, 0);
     g.setColour (themeBase().withAlpha (themeIndex == 0 ? 0.025f : 0.045f));
     g.fillAll();
 
-    // aura that breathes with the music
-    {
-        const auto c = displayRect.getCentre();
-        g.setGradientFill (juce::ColourGradient (accent.withAlpha (0.05f + 0.20f * level + 0.12f * bass), c.x, c.y,
-                                                 accent.withAlpha (0.0f), c.x + 700.0f, c.y + 300.0f, true));
-        g.fillAll();
-    }
-
-    // floating motes, faster and brighter with the low end
-    for (const auto& pt : particles)
-    {
-        const float a = (0.05f + 0.22f * bass + 0.08f * level) * (0.5f + 0.5f * std::sin (pt.phase));
-        g.setColour (accent.withAlpha (juce::jlimit (0.0f, 1.0f, a)));
-        g.fillEllipse (pt.x, pt.y, pt.size, pt.size);
-    }
-
-    drawTopBar (g, accent);
-    drawDisplay (g, accent);
-    drawMeters (g, accent);
+    drawTopBar (g, accent, true);
+    drawDisplay (g, accent, true);
+    drawMeters (g, accent, true);
 
     drawPanel (g, tonePanel.toFloat(), "TONE  &  COLOUR", accent, panelBase);
     drawPanel (g, dynPanel.toFloat(),  "DYNAMICS  &  OUTPUT", accent, panelBase);
 
-    if (scButton.getToggleState() && ! proc.scConnected.load())
+    bgScHint = scButton.getToggleState() && ! proc.scConnected.load();
+    if (bgScHint)
     {
         g.setColour (juce::Colour (0xffffa63d).withAlpha (0.85f));
         g.setFont (uiFont (9.0f, true));
-        g.drawText ("NO SIDECHAIN ROUTED", scButton.getX() - 130, scButton.getY(), 122, scButton.getHeight(),
-                    juce::Justification::centredRight, false);
+        g.drawText ("NO SIDECHAIN ROUTED", scHintRect, juce::Justification::centredRight, false);
     }
 
     // group labels above the faders
@@ -556,7 +575,7 @@ void MagicTouchEditor::paint (juce::Graphics& g)
         const int x0 = faders[(size_t) a]->getX() + 4;
         const int x1 = faders[(size_t) b]->getRight() - 4;
         const int y = dynPanel.getY() + 34;
-        g.setColour (c.withAlpha (0.55f));
+        g.setColour (c.withAlpha (0.65f));
         g.setFont (uiFont (9.5f, true).withExtraKerningFactor (0.15f));
         g.drawText (text, x0, y, x1 - x0, 12, juce::Justification::centred, false);
         g.setColour (c.withAlpha (0.25f));
@@ -565,18 +584,32 @@ void MagicTouchEditor::paint (juce::Graphics& g)
     group (0, 5, "GLUE COMPRESSOR", kFaderColours[0]);
     group (6, 8, "LIMITER", kFaderColours[6]);
     group (9, 9, "OUT", kFaderColours[9]);
+
+    bgPreset = proc.getCurrentPreset();
+    bgHue = hue;
+    lastBgBuildMs = juce::Time::getMillisecondCounterHiRes();
+    bgDirty = false;
 }
 
-void MagicTouchEditor::drawTopBar (juce::Graphics& g, juce::Colour accent)
+void MagicTouchEditor::drawTopBar (juce::Graphics& g, juce::Colour accent, bool staticPart)
 {
-    // logo: pulsing four-point sparkle + glowing wordmark
-    const float pulse = 0.5f + 0.5f * level;
-    juce::Path star;
-    star.addStar ({ 34.0f, 38.0f }, 4, 2.5f + 2.0f * pulse, 9.0f + 5.0f * pulse, 0.0f);
-    g.setColour (accent.withAlpha (0.25f));
-    g.strokePath (star, juce::PathStrokeType (5.0f));
-    g.setColour (accent.brighter (0.5f));
-    g.fillPath (star);
+    if (! staticPart)
+    {
+        // logo: pulsing four-point sparkle
+        const float pulse = 0.5f + 0.5f * level;
+        juce::Path star;
+        star.addStar ({ 34.0f, 38.0f }, 4, 2.5f + 2.0f * pulse, 9.0f + 5.0f * pulse, 0.0f);
+        g.setColour (accent.withAlpha (0.25f));
+        g.strokePath (star, juce::PathStrokeType (5.0f));
+        g.setColour (accent.brighter (0.5f));
+        g.fillPath (star);
+
+        // output volume value (the knob itself is a child component)
+        g.setColour (juce::Colours::white.withAlpha (0.95f));
+        g.setFont (uiFont (15.0f, true));
+        g.drawText (outKnob.getTextFromValue (outKnob.getValue()), outValueRect, juce::Justification::centredRight, false);
+        return;
+    }
 
     g.setFont (uiFont (22.0f, true).withExtraKerningFactor (0.25f));
     g.setColour (accent.withAlpha (0.28f));
@@ -663,70 +696,132 @@ void MagicTouchEditor::drawTopBar (juce::Graphics& g, juce::Colour accent)
         g.strokePath (caret, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     }
 
-    // output volume label + value (the knob itself is a child component)
+    // output volume label
     g.setColour (juce::Colours::white.withAlpha (0.45f));
     g.setFont (uiFont (9.5f, true).withExtraKerningFactor (0.2f));
     g.drawText ("OUTPUT", outTextRect.withHeight (18).translated (0, 3), juce::Justification::centredRight, false);
-    g.setColour (juce::Colours::white.withAlpha (0.95f));
-    g.setFont (uiFont (15.0f, true));
-    g.drawText (outKnob.getTextFromValue (outKnob.getValue()), outTextRect.withTrimmedTop (18),
-                juce::Justification::centredRight, false);
 }
 
-void MagicTouchEditor::drawDisplay (juce::Graphics& g, juce::Colour accent)
+// EQ display geometry, shared by the static and dynamic layers
+namespace
+{
+struct DispGeom
+{
+    float x0, x1, top, bottom, cy;
+    float fx (float f) const   { return x0 + (x1 - x0) * std::log (f / 20.0f) / std::log (1000.0f); }
+    float sy (float db) const  { return juce::jmap (juce::jlimit (-84.0f, -6.0f, db), -84.0f, -6.0f, bottom, top); }
+    float ey (float db) const  { return cy - juce::jlimit (-13.0f, 13.0f, db) * (bottom - top) * 0.5f * 0.9f / 12.0f; }
+};
+DispGeom dispGeom (juce::Rectangle<float> r)
+{
+    const float top = r.getY() + 16.0f, bottom = r.getBottom() - 22.0f;
+    return { r.getX() + 38.0f, r.getRight() - 38.0f, top, bottom, 0.5f * (top + bottom) };
+}
+} // namespace
+
+void MagicTouchEditor::updateEqCurve()
+{
+    auto pv = [this] (int i) { return proc.apvts.getRawParameterValue (kParams[(size_t) i].id)->load(); };
+    const std::array<float, 4> eq { pv (0), pv (1), pv (2), pv (3) };
+    if (eq == eqCached && ! eqCurve.isEmpty())
+        return;
+    eqCached = eq;
+
+    const auto d = dispGeom (displayRect);
+    const double prate = proc.getProcessingRate();
+    const std::array<Coeffs::Ptr, 4> cs { makeLowShelfC (prate, eq[0]), makeLowMidC (prate, eq[1]),
+                                          makePresC (prate, eq[2]),     makeAirC (prate, eq[3]) };
+    auto magDb = [&] (float f)
+    {
+        double m = 1.0;
+        for (const auto& c : cs)
+            m *= c->getMagnitudeForFrequency ((double) f, prate);
+        return (float) juce::Decibels::gainToDecibels (m);
+    };
+
+    eqCurve.clear();
+    eqArea.clear();
+    eqArea.startNewSubPath (d.x0, d.cy);
+    bool first = true;
+    for (float x = d.x0; x <= d.x1; x += 3.0f)
+    {
+        const float f = 20.0f * std::pow (1000.0f, (x - d.x0) / (d.x1 - d.x0));
+        const float y = d.ey (magDb (f));
+        if (first) { eqCurve.startNewSubPath (x, y); first = false; }
+        else eqCurve.lineTo (x, y);
+        eqArea.lineTo (x, y);
+    }
+    eqArea.lineTo (d.x1, d.cy);
+    eqArea.closeSubPath();
+
+    const float nodeF[4] = { kLowF, kBodyF, kPresF, kAirF };
+    for (size_t k = 0; k < 4; ++k)
+        eqNodes[k] = { d.fx (nodeF[k]), d.ey (magDb (nodeF[k])) };
+}
+
+void MagicTouchEditor::drawDisplay (juce::Graphics& g, juce::Colour accent, bool staticPart)
 {
     const auto r = displayRect;
-    g.setColour (juce::Colour (0xff080a10));
-    g.fillRoundedRectangle (r, 10.0f);
+    const auto d = dispGeom (r);
 
-    const double srate = proc.getSampleRate() > 0.0 ? proc.getSampleRate() : 44100.0;
-
+    if (staticPart)
     {
-        juce::Graphics::ScopedSaveState ss (g);
-        juce::Path clip;
-        clip.addRoundedRectangle (r, 10.0f);
-        g.reduceClipRegion (clip);
+        g.setColour (juce::Colour (0xff080a10));
+        g.fillRoundedRectangle (r, 10.0f);
 
-        const float x0 = r.getX() + 38.0f, x1 = r.getRight() - 38.0f;
-        const float top = r.getY() + 16.0f, bottom = r.getBottom() - 22.0f;
-        const float cy = 0.5f * (top + bottom);
-
-        auto fx = [=] (float f) { return x0 + (x1 - x0) * std::log (f / 20.0f) / std::log (1000.0f); };
-        auto sy = [=] (float db) { return juce::jmap (juce::jlimit (-84.0f, -6.0f, db), -84.0f, -6.0f, bottom, top); };
-
-        // grid
         g.setFont (uiFont (9.5f));
         const float freqs[] = { 50.0f, 100.0f, 200.0f, 500.0f, 1000.0f, 2000.0f, 5000.0f, 10000.0f };
         const char* fl[]    = { "50", "100", "200", "500", "1k", "2k", "5k", "10k" };
         for (int i = 0; i < 8; ++i)
         {
-            const float x = fx (freqs[i]);
+            const float x = std::round (d.fx (freqs[i]));
             g.setColour (juce::Colours::white.withAlpha (0.045f));
-            g.fillRect (x, top, 1.0f, bottom - top);
+            g.fillRect (x, d.top, 1.0f, d.bottom - d.top);
             g.setColour (juce::Colours::white.withAlpha (0.30f));
-            g.drawText (fl[i], (int) x - 20, (int) bottom + 4, 40, 14, juce::Justification::centred, false);
+            g.drawText (fl[i], (int) x - 20, (int) d.bottom + 4, 40, 14, juce::Justification::centred, false);
         }
         for (int db = -20; db >= -80; db -= 20)
         {
-            const float y = sy ((float) db);
+            const float y = std::round (d.sy ((float) db));
             g.setColour (juce::Colours::white.withAlpha (0.045f));
-            g.fillRect (x0, y, x1 - x0, 1.0f);
+            g.fillRect (d.x0, y, d.x1 - d.x0, 1.0f);
             g.setColour (juce::Colours::white.withAlpha (0.28f));
             g.drawText (juce::String (db), (int) r.getX() + 4, (int) y - 7, 30, 14, juce::Justification::centredRight, false);
         }
 
+        g.setColour (juce::Colours::white.withAlpha (0.10f));
+        g.fillRect (d.x0, std::round (d.cy), d.x1 - d.x0, 1.0f);
+        g.setFont (uiFont (9.5f));
+        g.setColour (juce::Colours::white.withAlpha (0.30f));
+        const int marks[] = { 12, 6, 0, -6, -12 };
+        for (int m : marks)
+            g.drawText (m > 0 ? "+" + juce::String (m) : juce::String (m), (int) d.x1 + 4, (int) d.ey ((float) m) - 7,
+                        30, 14, juce::Justification::centredLeft, false);
+
+        g.setColour (juce::Colours::white.withAlpha (0.35f));
+        g.setFont (uiFont (9.5f, true).withExtraKerningFactor (0.15f));
+        g.drawText ("TONE EQ  +  OUTPUT SPECTRUM", (int) r.getX() + 42, (int) r.getY() + 4, 260, 12,
+                    juce::Justification::left, false);
+        return;
+    }
+
+    const double srate = proc.getSampleRate() > 0.0 ? proc.getSampleRate() : 44100.0;
+    {
+        juce::Graphics::ScopedSaveState ss (g);
+        g.reduceClipRegion (juce::Rectangle<float> (d.x0, d.top - 4.0f, d.x1 - d.x0, d.bottom - d.top + 4.0f).toNearestInt());
+
         // spectrum
         {
             juce::Path fill, line;
-            const float step = 2.0f;
+            const float step = 3.0f;
             const float binHz = (float) srate / (float) MagicTouchProcessor::fftSize;
             const int maxBin = (int) spec.size() - 2;
             bool first = true;
 
-            for (float x = x0; x <= x1; x += step)
+            for (float x = d.x0; x <= d.x1; x += step)
             {
-                const float t0 = (x - x0) / (x1 - x0);
-                const float t1 = juce::jmin (1.0f, (x + step - x0) / (x1 - x0));
+                const float t0 = (x - d.x0) / (d.x1 - d.x0);
+                const float t1 = juce::jmin (1.0f, (x + step - d.x0) / (d.x1 - d.x0));
                 const float f0 = 20.0f * std::pow (1000.0f, t0);
                 const float f1 = 20.0f * std::pow (1000.0f, t1);
                 const float b0 = f0 / binHz, b1 = f1 / binHz;
@@ -749,12 +844,12 @@ void MagicTouchEditor::drawDisplay (juce::Graphics& g, juce::Colour accent)
                 }
 
                 v += 4.5f * std::log2 (std::sqrt (f0 * f1) / 1000.0f);   // pink-noise style tilt
-                const float y = sy (v);
+                const float y = d.sy (v);
 
                 if (first)
                 {
                     line.startNewSubPath (x, y);
-                    fill.startNewSubPath (x, bottom);
+                    fill.startNewSubPath (x, d.bottom);
                     fill.lineTo (x, y);
                     first = false;
                 }
@@ -764,93 +859,54 @@ void MagicTouchEditor::drawDisplay (juce::Graphics& g, juce::Colour accent)
                     fill.lineTo (x, y);
                 }
             }
-            fill.lineTo (x1, bottom);
+            fill.lineTo (d.x1, d.bottom);
             fill.closeSubPath();
 
-            g.setGradientFill (juce::ColourGradient (accent.withAlpha (0.50f), 0.0f, top,
-                                                     accent.withAlpha (0.0f), 0.0f, bottom, false));
+            g.setGradientFill (juce::ColourGradient (accent.withAlpha (0.50f), 0.0f, d.top,
+                                                     accent.withAlpha (0.0f), 0.0f, d.bottom, false));
             g.fillPath (fill);
             g.setColour (accent.withAlpha (0.18f));
-            g.strokePath (line, juce::PathStrokeType (6.0f));
+            g.strokePath (line, juce::PathStrokeType (4.0f));
             g.setColour (accent.brighter (0.35f));
-            g.strokePath (line, juce::PathStrokeType (1.6f));
+            g.strokePath (line, juce::PathStrokeType (1.5f));
         }
 
-        // EQ response curve (+/-12 dB) drawn from the exact filters the DSP uses
-        {
-            auto pv = [this] (int i) { return proc.apvts.getRawParameterValue (kParams[(size_t) i].id)->load(); };
-            const double prate = proc.getProcessingRate();
-            const std::array<Coeffs::Ptr, 4> cs { makeLowShelfC (prate, pv (0)), makeLowMidC (prate, pv (1)),
-                                                  makePresC (prate, pv (2)),     makeAirC (prate, pv (3)) };
-            auto magDb = [&] (float f)
-            {
-                double m = 1.0;
-                for (const auto& c : cs)
-                    m *= c->getMagnitudeForFrequency ((double) f, prate);
-                return (float) juce::Decibels::gainToDecibels (m);
-            };
-            const float scale = (bottom - top) * 0.5f * 0.9f / 12.0f;
-            auto ey = [=] (float db) { return cy - juce::jlimit (-13.0f, 13.0f, db) * scale; };
-
-            juce::Path curve, area;
-            area.startNewSubPath (x0, cy);
-            bool first = true;
-            for (float x = x0; x <= x1; x += 4.0f)
-            {
-                const float f = 20.0f * std::pow (1000.0f, (x - x0) / (x1 - x0));
-                const float y = ey (magDb (f));
-                if (first) { curve.startNewSubPath (x, y); first = false; }
-                else curve.lineTo (x, y);
-                area.lineTo (x, y);
-            }
-            area.lineTo (x1, cy);
-            area.closeSubPath();
-
-            g.setColour (juce::Colours::white.withAlpha (0.10f));
-            g.fillRect (x0, cy, x1 - x0, 1.0f);
-            g.setColour (juce::Colours::white.withAlpha (0.07f));
-            g.fillPath (area);
-            g.setColour (juce::Colours::white.withAlpha (0.14f));
-            g.strokePath (curve, juce::PathStrokeType (5.0f));
-            g.setColour (juce::Colours::white.withAlpha (0.92f));
-            g.strokePath (curve, juce::PathStrokeType (1.6f));
-
-            // band nodes
-            const float nodeF[4] = { 90.0f, 320.0f, 3200.0f, 11000.0f };
-            for (int i = 0; i < 4; ++i)
-            {
-                const float nx = fx (nodeF[i]);
-                const float ny = ey (magDb (nodeF[i]));
-                g.setColour (kKnobColours[i].withAlpha (0.35f));
-                g.fillEllipse (nx - 8.0f, ny - 8.0f, 16.0f, 16.0f);
-                g.setColour (kKnobColours[i]);
-                g.fillEllipse (nx - 4.5f, ny - 4.5f, 9.0f, 9.0f);
-                g.setColour (juce::Colours::white);
-                g.drawEllipse (nx - 4.5f, ny - 4.5f, 9.0f, 9.0f, 1.0f);
-            }
-
-            // gain axis on the right
-            g.setFont (uiFont (9.5f));
-            g.setColour (juce::Colours::white.withAlpha (0.30f));
-            const int marks[] = { 12, 6, 0, -6, -12 };
-            for (int m : marks)
-                g.drawText (m > 0 ? "+" + juce::String (m) : juce::String (m), (int) x1 + 4, (int) ey ((float) m) - 7,
-                            30, 14, juce::Justification::centredLeft, false);
-        }
-
-        g.setColour (juce::Colours::white.withAlpha (0.35f));
-        g.setFont (uiFont (9.5f, true).withExtraKerningFactor (0.15f));
-        g.drawText ("TONE EQ  +  OUTPUT SPECTRUM", (int) r.getX() + 42, (int) r.getY() + 4, 260, 12,
-                    juce::Justification::left, false);
+        // EQ response curve (cached; rebuilt only when an EQ knob moves)
+        updateEqCurve();
+        g.setColour (juce::Colours::white.withAlpha (0.07f));
+        g.fillPath (eqArea);
+        g.setColour (juce::Colours::white.withAlpha (0.14f));
+        g.strokePath (eqCurve, juce::PathStrokeType (4.0f));
+        g.setColour (juce::Colours::white.withAlpha (0.92f));
+        g.strokePath (eqCurve, juce::PathStrokeType (1.6f));
     }
 
-    drawGlass (g, r, 10.0f);
+    for (size_t k = 0; k < 4; ++k)
+    {
+        const auto n = eqNodes[k];
+        g.setColour (kKnobColours[k].withAlpha (0.35f));
+        g.fillEllipse (n.x - 8.0f, n.y - 8.0f, 16.0f, 16.0f);
+        g.setColour (kKnobColours[k]);
+        g.fillEllipse (n.x - 4.5f, n.y - 4.5f, 9.0f, 9.0f);
+        g.setColour (juce::Colours::white);
+        g.drawEllipse (n.x - 4.5f, n.y - 4.5f, 9.0f, 9.0f, 1.0f);
+    }
+
+    // glass finish, pre-rendered once
+    if (displayGlass.getWidth() != (int) r.getWidth() + 4)
+    {
+        displayGlass = juce::Image (juce::Image::ARGB, (int) r.getWidth() + 4, (int) r.getHeight() + 4, true);
+        juce::Graphics gg (displayGlass);
+        drawGlass (gg, juce::Rectangle<float> (2.0f, 2.0f, r.getWidth(), r.getHeight()), 10.0f);
+    }
+    g.drawImageAt (displayGlass, (int) r.getX() - 2, (int) r.getY() - 2);
 }
 
-void MagicTouchEditor::drawMeters (juce::Graphics& g, juce::Colour accent)
+void MagicTouchEditor::drawMeters (juce::Graphics& g, juce::Colour accent, bool staticPart)
 {
     const auto r = meterRect;
-    drawPanel (g, r, "LEVELS", accent, tinted (juce::Colour (0xff12151f), 0.05f));
+    if (staticPart)
+        drawPanel (g, r, "LEVELS", accent, tinted (juce::Colour (0xff12151f), 0.05f));
 
     // ---- numeric readouts: output peak (max hold), momentary + short-term loudness
     {
@@ -859,13 +915,17 @@ void MagicTouchEditor::drawMeters (juce::Graphics& g, juce::Colour accent)
         auto cell = [&] (int k, const char* label, float value, float minShown, juce::Colour vc)
         {
             const juce::Rectangle<float> c (r.getX() + 12.0f + (float) k * (rw + gap), ry, rw, rh);
-            g.setColour (juce::Colour (0xff07080d));
-            g.fillRoundedRectangle (c, 4.0f);
-            g.setColour (juce::Colours::white.withAlpha (0.06f));
-            g.drawRoundedRectangle (c.reduced (0.5f), 4.0f, 1.0f);
-            g.setColour (juce::Colours::white.withAlpha (0.42f));
-            g.setFont (uiFont (7.5f, true).withExtraKerningFactor (0.12f));
-            g.drawText (label, c.withHeight (12.0f).translated (0.0f, 2.0f).toNearestInt(), juce::Justification::centred, false);
+            if (staticPart)
+            {
+                g.setColour (juce::Colour (0xff07080d));
+                g.fillRoundedRectangle (c, 4.0f);
+                g.setColour (juce::Colours::white.withAlpha (0.06f));
+                g.drawRoundedRectangle (c.reduced (0.5f), 4.0f, 1.0f);
+                g.setColour (juce::Colours::white.withAlpha (0.42f));
+                g.setFont (uiFont (7.5f, true).withExtraKerningFactor (0.12f));
+                g.drawText (label, c.withHeight (12.0f).translated (0.0f, 2.0f).toNearestInt(), juce::Justification::centred, false);
+                return;
+            }
             g.setColour (vc);
             g.setFont (uiFont (12.5f, true));
             g.drawText (value <= minShown ? juce::String ("-inf") : juce::String (value, 1),
@@ -878,29 +938,44 @@ void MagicTouchEditor::drawMeters (juce::Graphics& g, juce::Colour accent)
     }
 
     // ---- bar geometry (pixel-aligned for crisp edges)
+    //      IN | dB scale | OUT    GR comp, GR lim | GR scale    RMS   SC
     const float top    = std::round (r.getY() + 74.0f);
     const float bottom = std::round (r.getBottom() - 24.0f);
     const float H      = bottom - top;
-    const float b0     = std::round (r.getX() + (r.getWidth() - 138.0f) * 0.5f);
+    const float b0     = std::round (r.getX() + (r.getWidth() - 158.0f) * 0.5f);
     const float bw     = 8.0f;
+    const float xRms = b0 + 124.0f, xSc = b0 + 148.0f, wide = 10.0f;
 
     // more resolution near the top: position = t^2 over a 60 dB range
     auto yOf  = [=] (float db) { const float t = juce::jlimit (0.0f, 1.0f, (db + 60.0f) / 60.0f); return bottom - t * t * H; };
     auto dbOf = [=] (float y)  { return std::sqrt (juce::jlimit (0.0f, 1.0f, (bottom - y) / H)) * 60.0f - 60.0f; };
     auto yGr  = [=] (float db) { return top + juce::jlimit (0.0f, 18.0f, db) / 18.0f * H; };
 
-    auto levelBar = [&] (float x, const MeterCh& m)
+    // segmented bar: static layer draws the unlit segments, dynamic layer only the lit ones
+    auto bar = [&] (float x, float w, float yLit, float yDim, std::function<juce::Colour (float)> colourAt)
     {
-        g.setColour (juce::Colour (0xff06070b));
-        g.fillRect (x, top, bw, H);
-        const float yPk = yOf (m.peak), yRms = yOf (m.rms);
+        if (staticPart)
+        {
+            g.setColour (juce::Colour (0xff06070b));
+            g.fillRect (x, top, w, H);
+        }
         for (float y = bottom - 2.0f; y >= top; y -= 3.0f)
         {
-            const float a = y >= yRms - 1.0f ? 1.0f : (y >= yPk - 1.0f ? 0.40f : 0.07f);
-            g.setColour (meterZone (dbOf (y + 1.0f)).withAlpha (a));
-            g.fillRect (x, y, bw, 2.0f);
+            float a;
+            if (staticPart)                a = 0.07f;
+            else if (y >= yLit - 1.0f)     a = 1.0f;
+            else if (y >= yDim - 1.0f)     a = 0.40f;
+            else                           break;
+            g.setColour (colourAt (y).withAlpha (a));
+            g.fillRect (x, y, w, 2.0f);
         }
-        if (m.hold > -59.0f)
+    };
+    auto zoneAt = [&] (float y) { return meterZone (dbOf (y + 1.0f)); };
+
+    auto levelBar = [&] (float x, const MeterCh& m)
+    {
+        bar (x, bw, yOf (m.rms), yOf (m.peak), zoneAt);
+        if (! staticPart && m.hold > -59.0f)
         {
             g.setColour (meterZone (m.hold).brighter (0.4f));
             g.fillRect (x - 1.0f, std::round (yOf (m.hold)) - 1.0f, bw + 2.0f, 2.0f);
@@ -909,12 +984,17 @@ void MagicTouchEditor::drawMeters (juce::Graphics& g, juce::Colour accent)
 
     auto grBar = [&] (float x, float db, juce::Colour c)
     {
-        g.setColour (juce::Colour (0xff06070b));
-        g.fillRect (x, top, bw, H);
+        if (staticPart)
+        {
+            g.setColour (juce::Colour (0xff06070b));
+            g.fillRect (x, top, bw, H);
+        }
         const float yEnd = yGr (db);
         for (float y = top; y + 2.0f <= bottom; y += 3.0f)
         {
-            g.setColour (c.withAlpha (y + 2.0f <= yEnd + 0.5f ? 1.0f : 0.07f));
+            const bool lit = y + 2.0f <= yEnd + 0.5f;
+            if (! staticPart && ! lit) break;
+            g.setColour (c.withAlpha (staticPart ? 0.07f : 1.0f));
             g.fillRect (x, y, bw, 2.0f);
         }
     };
@@ -922,13 +1002,18 @@ void MagicTouchEditor::drawMeters (juce::Graphics& g, juce::Colour accent)
     auto clipLed = [&] (float x, float w, bool on)
     {
         const juce::Rectangle<float> c (x, top - 9.0f, w, 5.0f);
-        if (on)
+        if (staticPart)
+        {
+            g.setColour (juce::Colour (0xff1a1e2a));
+            g.fillRect (c);
+        }
+        else if (on)
         {
             g.setColour (juce::Colour (0xffff3b4f).withAlpha (0.35f));
             g.fillRect (c.expanded (1.5f));
+            g.setColour (juce::Colour (0xffff3b4f));
+            g.fillRect (c);
         }
-        g.setColour (on ? juce::Colour (0xffff3b4f) : juce::Colour (0xff1a1e2a));
-        g.fillRect (c);
     };
 
     // IN | scale | OUT
@@ -939,8 +1024,23 @@ void MagicTouchEditor::drawMeters (juce::Graphics& g, juce::Colour accent)
     levelBar (b0 + 44.0f, mtr[2]);
     levelBar (b0 + 54.0f, mtr[3]);
 
-    // dB scale between IN and OUT
+    // gain reduction: glue compressor + limiter, 0..18 dB downward
+    grBar (b0 + 80.0f, grComp, kFaderColours[0]);
+    grBar (b0 + 91.0f, grLim,  kFaderColours[6]);
+
+    // output RMS (300 ms, both channels)
+    bar (xRms, wide, yOf (rmsOut), yOf (rmsOut), zoneAt);
+
+    // external sidechain input level
     {
+        const bool active = scButton.getToggleState() && proc.scConnected.load();
+        const auto scCol = kFaderColours[0].withAlpha (active ? 1.0f : 0.32f);
+        bar (xSc, wide, yOf (scLevel), yOf (scLevel), [scCol] (float) { return scCol; });
+    }
+
+    if (staticPart)
+    {
+        // dB scale between IN and OUT
         g.setFont (uiFont (8.0f));
         for (int db = 0; db >= -12; --db)   // 1 dB minor ticks where it matters
         {
@@ -959,13 +1059,8 @@ void MagicTouchEditor::drawMeters (juce::Graphics& g, juce::Colour accent)
             g.setColour (juce::Colours::white.withAlpha (0.55f));
             g.drawText (juce::String (db), (int) b0 + 20, (int) y - 5, 22, 10, juce::Justification::centred, false);
         }
-    }
 
-    // gain reduction: glue compressor + limiter, 0..18 dB downward
-    grBar (b0 + 80.0f, grComp, kFaderColours[0]);
-    grBar (b0 + 91.0f, grLim,  kFaderColours[6]);
-    {
-        g.setFont (uiFont (8.0f));
+        // GR scale
         for (int db = 0; db <= 18; db += 3)
         {
             const float y = std::round (yGr ((float) db));
@@ -974,39 +1069,31 @@ void MagicTouchEditor::drawMeters (juce::Graphics& g, juce::Colour accent)
             g.setColour (juce::Colours::white.withAlpha (0.55f));
             g.drawText (juce::String (db), (int) b0 + 104, (int) y - 5, 16, 10, juce::Justification::centredLeft, false);
         }
-        g.setFont (uiFont (8.5f, true));
-        g.setColour (kFaderColours[0].withAlpha (0.9f));
-        g.drawText (juce::String (grComp, 1), (int) b0 + 74, (int) top - 12, 20, 10, juce::Justification::centred, false);
-        g.setColour (kFaderColours[6].withAlpha (0.9f));
-        g.drawText (juce::String (grLim, 1), (int) b0 + 87, (int) top - 12, 20, 10, juce::Justification::centred, false);
-    }
 
-    // external sidechain input level
-    {
-        const bool active = scButton.getToggleState() && proc.scConnected.load();
-        const float x = b0 + 128.0f;
-        g.setColour (juce::Colour (0xff06070b));
-        g.fillRect (x, top, 10.0f, H);
-        const float yLvl = yOf (scLevel);
-        for (float y = bottom - 2.0f; y >= top; y -= 3.0f)
+        // labels
+        g.setFont (uiFont (8.5f, true).withExtraKerningFactor (0.1f));
+        g.setColour (juce::Colours::white.withAlpha (0.55f));
+        auto label = [&] (float cx, const char* t)
         {
-            const bool lit = y >= yLvl - 1.0f;
-            g.setColour (kFaderColours[0].withAlpha (lit ? (active ? 0.95f : 0.30f) : 0.07f));
-            g.fillRect (x, y, 10.0f, 2.0f);
-        }
+            g.drawText (t, (int) cx - 20, (int) bottom + 6, 40, 11, juce::Justification::centred, false);
+        };
+        label (b0 + 9.0f,          "IN");
+        label (b0 + 53.0f,         "OUT");
+        label (b0 + 94.5f,         "GR");
+        label (xRms + wide * 0.5f, "RMS");
+        label (xSc + wide * 0.5f,  "SC");
+        return;
     }
 
-    // labels
-    g.setFont (uiFont (8.5f, true).withExtraKerningFactor (0.1f));
-    g.setColour (juce::Colours::white.withAlpha (0.55f));
-    auto label = [&] (float cx, const char* t)
-    {
-        g.drawText (t, (int) cx - 20, (int) bottom + 6, 40, 11, juce::Justification::centred, false);
-    };
-    label (b0 + 9.0f,   "IN");
-    label (b0 + 53.0f,  "OUT");
-    label (b0 + 94.5f,  "GR");
-    label (b0 + 133.0f, "SC");
+    // live numbers above the GR and RMS bars
+    g.setFont (uiFont (8.5f, true));
+    g.setColour (kFaderColours[0].withAlpha (0.9f));
+    g.drawText (juce::String (grComp, 1), (int) b0 + 74, (int) top - 12, 20, 10, juce::Justification::centred, false);
+    g.setColour (kFaderColours[6].withAlpha (0.9f));
+    g.drawText (juce::String (grLim, 1), (int) b0 + 87, (int) top - 12, 20, 10, juce::Justification::centred, false);
+    g.setColour (juce::Colours::white.withAlpha (0.85f));
+    g.drawText (rmsOut <= -69.0f ? juce::String ("-inf") : juce::String (rmsOut, 1),
+                (int) (xRms + wide * 0.5f) - 14, (int) top - 12, 28, 10, juce::Justification::centred, false);
 }
 
 //==============================================================================
@@ -1031,6 +1118,7 @@ void MagicTouchEditor::stepPreset (int dir)
     const int cur = proc.getCurrentPreset();
     const int next = cur < 0 ? (dir > 0 ? 0 : n - 1) : (cur + dir + n) % n;
     proc.loadPreset (next);
+    bgDirty = true;
     repaint();
 }
 
@@ -1051,6 +1139,7 @@ void MagicTouchEditor::showPresetMenu()
                             if (safe != nullptr && result > 0)
                             {
                                 safe->proc.loadPreset (result - 1);
+                                safe->bgDirty = true;
                                 safe->repaint();
                             }
                         });

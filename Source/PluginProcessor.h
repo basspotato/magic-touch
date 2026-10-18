@@ -133,6 +133,7 @@ private:
 
     // compressor (smooth decoupled peak detector with program-dependent release)
     float grRel = 0.0f, grAtt = 0.0f, grSlowRel = 0.0f, grSlowAtt = 0.0f;
+    float compDet = 0.0f, compGain = 1.0f, compGainStep = 0.0f;
 
     // look-ahead limiter (oversampled -> catches inter-sample peaks)
     int N = 64, wpos = 0;

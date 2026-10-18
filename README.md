@@ -40,8 +40,15 @@ The pill's light is amber when the switch is on but nothing is routed to the sid
 - LEVELS: segmented peak + RMS meters for input/output with peak holds and clip lights,
   compressor and limiter gain reduction, sidechain level, and readouts for output peak,
   momentary (LUFS M) and short-term (LUFS S) loudness. Click the readouts to reset.
-- ANALYZER: 1/6-octave smoothed output spectrum with peak hold, input spectrum for
-  comparison (click IN to hide it), 3 dB/oct tilt, and a hover readout (Hz, note, dB).
+- LEVELS also has an output RMS meter (300 ms, both channels) next to the SC meter.
+- ANALYZER: pick a display from the dropdown in its header (remembered per session):
+  Classic (filled spectrum, peak hold, input overlay, hover readout), 3D Waterfall,
+  Spectral Cloud, Prism, Spectrogram (scrolling heat map) and 1/3-Octave RTA.
+
+## CPU
+The GUI caches everything static and only redraws the meters, displays and moving parts
+at 30 fps; knobs and faders redraw only when they move. Closing the plugin window removes
+the GUI cost entirely.
 
 ## 20 presets
 Click the preset name in the top bar (or the arrows). Defined in Source/Params.h, easy to edit.

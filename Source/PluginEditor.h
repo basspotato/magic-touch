@@ -65,15 +65,17 @@ public:
     void mouseDown (const juce::MouseEvent&) override;
 
 private:
-    struct Particle { float x, y, speed, size, phase; };
     struct MeterCh  { float peak = -90.0f, rms = -90.0f, hold = -90.0f, holdT = 0.0f; bool clip = false; };
 
     void timerCallback() override;
     void updateSpectrum (float dt);
-    void drawTopBar  (juce::Graphics&, juce::Colour accent);
-    void drawDisplay (juce::Graphics&, juce::Colour accent);
-    void drawMeters  (juce::Graphics&, juce::Colour accent);
+    // drawing is split into a cached static layer and small dynamic layers that repaint per frame
+    void drawTopBar  (juce::Graphics&, juce::Colour accent, bool staticPart);
+    void drawDisplay (juce::Graphics&, juce::Colour accent, bool staticPart);
+    void drawMeters  (juce::Graphics&, juce::Colour accent, bool staticPart);
     void buildChassis();
+    void buildBackground();
+    void updateEqCurve();
     void stepPreset (int dir);
     void showPresetMenu();
     void showThemeMenu();
@@ -95,14 +97,28 @@ private:
     juce::TooltipWindow tooltips { this, 500 };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> scAttachment;
 
-    juce::Image chassis;   // cached static background
+    juce::Image chassis;      // brushed metal, bezel, screws
+    juce::Image background;   // chassis + panels + labels + grids: everything that doesn't move
+    juce::Image displayGlass; // glare/inner-shadow overlay for the EQ display
+    bool bgDirty = true;
+    int bgPreset = -2;
+    bool bgScHint = false;
+    float bgHue = -1.0f;
+    double lastBgBuildMs = 0.0;
+    double lastOutValue = 1.0e9;
+
+    // EQ curve cache (rebuilt only when an EQ knob moves)
+    juce::Path eqCurve, eqArea;
+    std::array<juce::Point<float>, 4> eqNodes {};
+    std::array<float, 4> eqCached { 99.0f, 99.0f, 99.0f, 99.0f };
 
     // themes
     int themeIndex = 0;
     std::unique_ptr<juce::PropertiesFile> settings;
 
     // layout
-    juce::Rectangle<int>   topBar, presetRect, prevRect, nextRect, nameRect, tonePanel, dynPanel, themeRect, outTextRect;
+    juce::Rectangle<int>   topBar, presetRect, prevRect, nextRect, nameRect, tonePanel, dynPanel, themeRect, outTextRect,
+                           starRect, outValueRect, scHintRect;
     juce::Rectangle<float> displayRect, meterRect, meterResetRect;
 
     // analyser
@@ -114,14 +130,12 @@ private:
 
     // meters (dB)
     std::array<MeterCh, 4> mtr {};   // in L, in R, out L, out R
-    float grComp = 0.0f, grLim = 0.0f, scLevel = -90.0f;
+    float grComp = 0.0f, grLim = 0.0f, scLevel = -90.0f, rmsOut = -90.0f;
     float outMax = -90.0f, lufsMDisp = -90.0f, lufsSDisp = -90.0f;
     double lastTickMs = 0.0;
 
     // reactive visuals
     float level = 0.0f, bass = 0.0f, hue = 0.52f;
-    std::array<Particle, 48> particles {};
-    juce::Random rng;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MagicTouchEditor)
 };

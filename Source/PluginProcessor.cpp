@@ -3,6 +3,20 @@
 
 using namespace MT;
 
+namespace
+{
+// Smooth saturating curve (Lambert continued-fraction tanh, clamped where it reaches +/-1 with zero slope).
+// Within ~2% of tanh, continuous in value and slope, and many times cheaper; at 4x oversampling
+// it sounds the same.
+inline float satCurve (float x) noexcept
+{
+    if (x >  3.0f) return  1.0f;
+    if (x < -3.0f) return -1.0f;
+    const float x2 = x * x;
+    return x * (27.0f + x2) / (27.0f + 9.0f * x2);
+}
+} // namespace
+
 //==============================================================================
 MagicTouchProcessor::MagicTouchProcessor()
     : AudioProcessor (BusesProperties()
@@ -146,6 +160,9 @@ void MagicTouchProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     tubeEnvA = 1.0f - coef (30.0);
     tubeEnv.fill (0.0f);
     grRel = grAtt = grSlowRel = grSlowAtt = 0.0f;
+    compDet = 0.0f;
+    compGain = 1.0f;
+    compGainStep = 0.0f;
 
     // ---- 1.5 ms look-ahead limiter at the oversampled rate; N - 1 is a multiple of the
     //      oversampling ratio so the total latency is a whole number of host samples
@@ -269,7 +286,7 @@ float MagicTouchProcessor::tubeStage (float x, size_t ch, float a)
 
     const float d = 1.0f + a * 1.8f;
     const float bias = a * (0.08f + 0.30f * env);
-    auto f = [] (float u) { return u >= 0.0f ? std::tanh (u) : std::tanh (0.6f * u) / 0.6f; };
+    auto f = [] (float u) { return u >= 0.0f ? satCurve (u) : satCurve (0.6f * u) / 0.6f; };
 
     const float y = (f (x * d + bias) - f (bias)) / d;
     const float w = tubeDc[ch].processSample (y);
@@ -283,7 +300,7 @@ float MagicTouchProcessor::tapeStage (float x, size_t ch, float a)
     float y = tapeBump[ch].processSample (x);
     y = tapePre[ch].processSample (y);
     const float d = 1.0f + a * 2.2f;
-    y = std::tanh (y * d) / d;
+    y = satCurve (y * d) / d;
     y = tapeDe[ch].processSample (y);
     y = tapeLp[ch].processSample (y);
     return x + (y - x) * a;
@@ -294,7 +311,7 @@ float MagicTouchProcessor::exciteStage (float x, size_t ch, float a)
     // Generate harmonics from the high band only (pure distortion product, linear part removed),
     // then high-pass them so intermodulation doesn't muddy the mids
     const float hp = exciteHp[ch].processSample (x);
-    const float harm = excitePost[ch].processSample (hp - 0.25f * std::tanh (4.0f * hp));
+    const float harm = excitePost[ch].processSample (hp - 0.25f * satCurve (4.0f * hp));
     return x + a * 3.0f * harm;
 }
 
@@ -481,10 +498,12 @@ void MagicTouchProcessor::processChunk (float* L, float* R, const float* scL, co
     const float knee   = 6.0f;
     const double atkMs = (double) P (pCompAttack), relMs = (double) P (pCompRelease);
     auto oc = [this] (double ms) { return (float) std::exp (-1.0 / (osr * 0.001 * ms)); };
-    const float atkC     = oc (atkMs);
-    const float relC     = oc (relMs);
-    const float atkSlowC = oc (juce::jlimit (30.0, 300.0, atkMs * 8.0));   // program-dependent "glue" branch
-    const float relSlowC = oc (relMs * 3.0);
+    // compressor ballistics run once per host sample (every kOsRatio oversampled samples)
+    auto bc = [this] (double ms) { return (float) std::exp (-1.0 / (sr * 0.001 * ms)); };
+    const float atkC     = bc (atkMs);
+    const float relC     = bc (relMs);
+    const float atkSlowC = bc (juce::jlimit (30.0, 300.0, atkMs * 8.0));   // program-dependent "glue" branch
+    const float relSlowC = bc (relMs * 3.0);
 
     // ---- limiter settings
     const float ceilLin = juce::Decibels::decibelsToGain (P (pCeiling));
@@ -541,21 +560,31 @@ void MagicTouchProcessor::processChunk (float* L, float* R, const float* scL, co
             float dR = scHp[1].processSample (srcR);
             if (useExtSc) { dL = srcL; dR = srcR; }
 
-            const float xdB = juce::Decibels::gainToDecibels (std::max (std::abs (dL), std::abs (dR)), -120.0f);
-            const float over = xdB - thresh;
-            float gc = 0.0f;
-            if (2.0f * over <= -knee)          gc = 0.0f;
-            else if (2.0f * over < knee)       { const float t = over + knee * 0.5f; gc = slope * t * t / (2.0f * knee); }
-            else                               gc = slope * over;
+            // peak over the oversampled samples (so inter-sample peaks count), evaluated once per host sample
+            compDet = std::max (compDet, std::max (std::abs (dL), std::abs (dR)));
+            if ((j & (kOsRatio - 1)) == kOsRatio - 1)
+            {
+                const float xdB = juce::Decibels::gainToDecibels (compDet, -120.0f);
+                compDet = 0.0f;
+                const float over = xdB - thresh;
+                float gc = 0.0f;
+                if (2.0f * over <= -knee)          gc = 0.0f;
+                else if (2.0f * over < knee)       { const float t = over + knee * 0.5f; gc = slope * t * t / (2.0f * knee); }
+                else                               gc = slope * over;
 
-            grRel = std::max (gc, relC * grRel + (1.0f - relC) * gc);
-            grAtt = atkC * grAtt + (1.0f - atkC) * grRel;
-            grSlowAtt = gc > grSlowAtt ? atkSlowC * grSlowAtt + (1.0f - atkSlowC) * gc
-                                       : relSlowC * grSlowAtt + (1.0f - relSlowC) * gc;
-            const float gr = std::max (grAtt, grSlowAtt);
-            grMaxBlock = std::max (grMaxBlock, gr);
+                grRel = std::max (gc, relC * grRel + (1.0f - relC) * gc);
+                grAtt = atkC * grAtt + (1.0f - atkC) * grRel;
+                grSlowAtt = gc > grSlowAtt ? atkSlowC * grSlowAtt + (1.0f - atkSlowC) * gc
+                                           : relSlowC * grSlowAtt + (1.0f - relSlowC) * gc;
+                const float gr = std::max (grAtt, grSlowAtt);
+                grMaxBlock = std::max (grMaxBlock, gr);
 
-            const float g = juce::Decibels::decibelsToGain (makeup - gr);
+                // glide to the new gain over the next host sample (no steps at the oversampled rate)
+                compGainStep = (juce::Decibels::decibelsToGain (makeup - gr) - compGain) / (float) kOsRatio;
+            }
+            compGain += compGainStep;
+
+            const float g = compGain;
             const float cm = smCompMix.getNextValue();
             l += (l * g - l) * cm;
             r += (r * g - r) * cm;

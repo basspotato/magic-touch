@@ -218,16 +218,31 @@ public:
         g.setColour (juce::Colours::white.withAlpha (0.07f));
         g.drawRoundedRectangle (slot.expanded (0.5f), 4.0f, 1.0f);
 
-        // backlit fill with bloom
-        const auto fill = juce::Rectangle<float> (cx - 1.75f, sliderPos, 3.5f, bottom - 3.0f - sliderPos);
-        g.setColour (col.withAlpha (hot ? 0.20f : 0.12f));
-        g.fillRoundedRectangle (fill.expanded (5.0f, 2.0f), 5.0f);
-        g.setColour (col.withAlpha (0.35f));
-        g.fillRoundedRectangle (fill.expanded (2.0f, 1.0f), 3.0f);
-        g.setColour (col.brighter (0.2f));
-        g.fillRoundedRectangle (fill, 1.75f);
-        g.setColour (juce::Colours::white.withAlpha (0.45f));
-        g.fillRect (cx - 0.5f, sliderPos, 1.0f, fill.getHeight());
+        // backlit fill: fades up from a dim ember at the bottom to full colour at the cap,
+        // and the whole fill burns hotter as the value rises
+        const float prop = (float) s.valueToProportionOfLength (s.getValue());
+        const float fillH = bottom - 3.0f - sliderPos;
+        if (fillH > 0.5f)
+        {
+            const auto fill = juce::Rectangle<float> (cx - 1.75f, sliderPos, 3.5f, fillH);
+            const auto hotCol  = col.withMultipliedSaturation (0.85f + 0.3f * prop).brighter (0.1f + 0.55f * prop);
+            const auto coldCol = col.darker (0.85f).withAlpha (0.30f);
+
+            juce::ColourGradient glow (hotCol.withAlpha ((hot ? 0.10f : 0.05f) + 0.22f * prop), 0.0f, sliderPos,
+                                       col.withAlpha (0.0f), 0.0f, bottom, false);
+            g.setGradientFill (glow);
+            g.fillRoundedRectangle (fill.expanded (5.0f, 2.0f), 5.0f);
+
+            juce::ColourGradient body (hotCol, 0.0f, sliderPos, coldCol, 0.0f, bottom, false);
+            body.addColour (0.35, col.withAlpha (0.55f + 0.35f * prop));
+            g.setGradientFill (body);
+            g.fillRoundedRectangle (fill.expanded (1.0f, 0.0f), 2.25f);
+
+            juce::ColourGradient core (juce::Colours::white.withAlpha (0.35f + 0.45f * prop), 0.0f, sliderPos,
+                                       juce::Colours::white.withAlpha (0.0f), 0.0f, sliderPos + fillH * 0.85f, false);
+            g.setGradientFill (core);
+            g.fillRect (cx - 0.5f, sliderPos, 1.0f, fillH);
+        }
 
         // machined cap: shadow, brushed metal body, grip grooves, lit index line
         const juce::Rectangle<float> thumb (cx - 14.0f, sliderPos - 8.0f, 28.0f, 16.0f);
