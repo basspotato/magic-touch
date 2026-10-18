@@ -43,9 +43,10 @@ The pill's light is amber when the switch is on but nothing is routed to the sid
 - LEVELS also has an output RMS meter (300 ms, both channels) next to the SC meter.
 - ANALYZER: pick a display from the dropdown in its header (remembered per session):
   Classic (filled spectrum, peak hold, input overlay, hover readout), 3D Waterfall,
-  Spectral Cloud, Waveform (the song scrolling past as layered glowing bands: kick hits in
-  deep purple, 20-200 Hz blue, 200 Hz-1 kHz magenta, 1-6 kHz orange, 6-10 kHz yellow,
-  10-20 kHz white, mirrored in a reflection), Spectrogram (scrolling heat map) and
+  Spectral Cloud, Waveform (the song scrolling past; each slice is a smooth gradient that
+  follows the band balance: sub 20-60 Hz indigo, bass 60-250 azure, low-mids 250-500 orchid,
+  mids 500-2k coral, presence 2-6k amber, air 6-20k warm cream, with warm glowing edges,
+  kicks deepening toward plum, and a reflection), Spectrogram (scrolling heat map) and
   1/3-Octave RTA.
 - Every theme is music-reactive: the theme colour brightens and leans in hue with level,
   the glow and particles between panels breathe with the music, and panel rims light up.

@@ -5,8 +5,9 @@
 //   Classic        - filled 1/6-octave spectrum + peak hold + input overlay, hover readout
 //   3D Waterfall   - perspective landscape of recent spectra in a fire palette
 //   Spectral Cloud - smoky persistence trails with a thin average line, mint on graphite
-//   Waveform       - the song scrolling past as layered glowing bands: kick (deep purple), bass (blue),
-//                    low-mids (magenta), mids (orange), upper (yellow), air (white), with a reflection
+//   Waveform       - the song scrolling past; each slice is one smooth gradient whose colours follow
+//                    the band balance (sub indigo -> bass azure -> low-mid orchid -> mid coral ->
+//                    presence amber -> air cream), warm glowing edges, kicks deepen to plum, reflection
 //   Spectrogram    - scrolling time/frequency heat map (inferno palette)
 //   1/3-Octave RTA - 31 ISO bands as segmented LED columns with peak caps
 //
@@ -89,11 +90,14 @@ private:
     juce::Image waveImg;
     std::vector<float> waveBuf = std::vector<float> (MagicTouchProcessor::ringSize);
     int waveLastPos = -1, waveColCount = 0;
-    // band split: two cascaded one-pole low-passes at 200 Hz, 1 kHz, 6 kHz and 10 kHz
-    std::array<float, 8> waveLp {};
+    // band split (sub / bass / low-mid / mid / presence / air): two cascaded one-pole
+    // low-passes at 60, 250, 500, 2000 and 6000 Hz
+    std::array<float, 10> waveLp {};
     float kickFast = 0.0f, kickSlow = 0.0f, kickHold = 0.0f;               // low-band envelopes for spotting kick hits
     float wPeak = 0.0f, wKick = 0.0f;
-    std::array<float, 5> wBand {};                         // per-column band energies
+    std::array<float, 6> wBand {};                         // per-column band energies
+    std::array<float, 6> waveShare {};                     // smoothed band balance (drives the colour blend)
+    float waveKickSm = 0.0f;
     std::array<float, rtaBands> rta {}, rtaPeak {}, rtaHoldT {};
     std::array<std::pair<int, int>, rtaBands> rtaRange {};
 

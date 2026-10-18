@@ -710,18 +710,21 @@ void SpectrumAnalyzer::drawCloud (juce::Graphics& g)
 
 namespace
 {
-// Waveform palette, from the kick up to the air band
-const juce::Colour kWaveKick     { 0xff1d0729 };   // dark purple, almost black
-const juce::Colour kWaveKickRim  { 0xff6a2a92 };   // violet edge so the kick reads against the dark
-const juce::Colour kWaveBands[5] = {
-    juce::Colour (0xff3a9bff),   //    20 -   200 Hz  blue
-    juce::Colour (0xffb3127c),   //   200 -  1000 Hz  deep magenta
-    juce::Colour (0xffff8a24),   //  1000 -  6000 Hz  bright warm orange
-    juce::Colour (0xffffc21a),   //  6000 - 10000 Hz  deep warm yellow
-    juce::Colour (0xfff6f8ff)    // 10000 - 20000 Hz  white
+// Waveform palette: cool and dark in the lows, warm through the mids, bright and pale in the highs,
+// an analogous ramp so neighbouring bands blend instead of clashing.
+// Bands follow the common engineering split: sub / bass / low-mid / mid / presence / air.
+const juce::Colour kWaveBands[6] = {
+    juce::Colour (0xff4a2fd0),   //    20 -    60 Hz  sub       deep indigo
+    juce::Colour (0xff2f8dff),   //    60 -   250 Hz  bass      azure blue
+    juce::Colour (0xffc040d8),   //   250 -   500 Hz  low-mid   orchid
+    juce::Colour (0xffff5c78),   //   500 -  2000 Hz  mid       warm coral
+    juce::Colour (0xffffa63e),   //  2000 -  6000 Hz  presence  amber
+    juce::Colour (0xffffe8c2)    //  6000 - 20000 Hz  air       warm cream
 };
-// higher bands carry far less energy; lift them so their detail shows
-const float kWaveGain[5] = { 1.15f, 1.3f, 1.55f, 1.9f, 2.2f };
+const juce::Colour kWaveKick { 0xff230a36 };   // kicks pull the outer colours toward a deep plum
+const juce::Colour kWaveEdge { 0xffffb46e };   // warm amber glow on the edges
+// higher bands carry far less energy; lift them so their colour can show
+const float kWaveGain[6] = { 1.0f, 1.0f, 1.3f, 1.6f, 2.2f, 3.0f };
 } // namespace
 
 void SpectrumAnalyzer::feedWaveform()
@@ -744,22 +747,20 @@ void SpectrumAnalyzer::feedWaveform()
 
     const int samplesPerCol = juce::jmax (1, (int) std::round (srate / (double) wavePxPerSec));
     auto pole = [srate] (float hz) { return std::exp (-juce::MathConstants<float>::twoPi * hz / (float) srate); };
-    const float c[4] = { pole (200.0f), pole (1000.0f), pole (6000.0f), pole (10000.0f) };
-    const float kFastA = pole (1.0f / (0.001f * juce::MathConstants<float>::twoPi)),    // ~1 ms
-                kFastR = pole (1.0f / (0.030f * juce::MathConstants<float>::twoPi)),    // ~30 ms
-                kSlowA = pole (1.0f / (0.060f * juce::MathConstants<float>::twoPi)),    // ~60 ms
-                kSlowR = pole (1.0f / (0.300f * juce::MathConstants<float>::twoPi));    // ~300 ms
+    const float c[5] = { pole (60.0f), pole (250.0f), pole (500.0f), pole (2000.0f), pole (6000.0f) };
+    auto envCoef = [srate] (float secs) { return std::exp (-1.0f / ((float) srate * secs)); };
+    const float kFastA = envCoef (0.001f), kFastR = envCoef (0.030f);
+    const float kSlowA = envCoef (0.060f), kSlowR = envCoef (0.300f);
+    const float kHoldDecay = envCoef (0.10f);
 
     const float cy = (float) h * 0.5f, half = (float) h * 0.47f;
-    const float kHoldDecay = std::exp (-1.0f / ((float) srate * 0.10f));
 
     for (int i = 0; i < n; ++i)
     {
         const float x = waveBuf[(size_t) i];
 
-        // 4 splits, each two cascaded one-pole low-passes
-        float lp[4];
-        for (int k = 0; k < 4; ++k)
+        float lp[5];
+        for (int k = 0; k < 5; ++k)
         {
             auto& s1 = waveLp[(size_t) (k * 2)];
             auto& s2 = waveLp[(size_t) (k * 2 + 1)];
@@ -767,79 +768,91 @@ void SpectrumAnalyzer::feedWaveform()
             s2 = s1 + c[k] * (s2 - s1);
             lp[k] = s2;
         }
-        const float band[5] = { lp[0], lp[1] - lp[0], lp[2] - lp[1], lp[3] - lp[2], x - lp[3] };
-        for (size_t k = 0; k < 5; ++k)
+        const float band[6] = { lp[0], lp[1] - lp[0], lp[2] - lp[1], lp[3] - lp[2], lp[4] - lp[3], x - lp[4] };
+        for (size_t k = 0; k < 6; ++k)
             wBand[k] += band[k] * band[k];
 
-        // kick = a sharp attack in the low band (fast envelope jumping well above the slow one)
-        const float lo = std::abs (band[0]);
+        // kick = a sharp attack in the lows (sub + bass), held through the body of the hit
+        const float lo = std::abs (lp[1]);
         kickFast = lo + (lo > kickFast ? kFastA : kFastR) * (kickFast - lo);
         kickSlow = lo + (lo > kickSlow ? kSlowA : kSlowR) * (kickSlow - lo);
         const float kickness = juce::jlimit (0.0f, 1.0f, (kickFast - 1.25f * kickSlow) / (kickFast + 1.0e-6f) * 3.0f);
-        // hold the hit through the body of the drum (~100 ms) so each kick reads as a solid shape
-        kickHold = std::max (kickness * kickFast, kickHold * kHoldDecay);
-        wKick = std::max (wKick, std::min (kickHold, kickFast));
+        kickHold = std::max (kickness, kickHold * kHoldDecay);
+        wKick = std::max (wKick, kickHold);
         wPeak = std::max (wPeak, std::abs (x));
 
         if (++waveColCount < samplesPerCol)
             continue;
 
-        // ---- one finished column: scroll left a pixel and paint it at the right edge
+        // ---- one finished column -------------------------------------------------------------
+        float e[6], sum = 1.0e-9f, ms = 0.0f;
+        for (size_t k = 0; k < 6; ++k)
+        {
+            ms += wBand[k];
+            e[k] = std::sqrt (wBand[k] / (float) samplesPerCol) * kWaveGain[k];
+            sum += e[k];
+        }
+        // the colour balance glides from slice to slice, so colours flow with the music
+        for (size_t k = 0; k < 6; ++k)
+            waveShare[k] += (e[k] / sum - waveShare[k]) * 0.35f;
+        waveKickSm += (wKick - waveKickSm) * 0.5f;
+
+        const float rms = std::sqrt (ms / (float) samplesPerCol);
+        auto heightOf = [&] (float amp) { return half * std::pow (juce::jlimit (0.0f, 1.0f, amp), 0.75f); };
+        const float body = juce::jmax (1.0f, heightOf (rms * 1.6f));
+        const float halo = juce::jmax (body, heightOf (wPeak));
+
+        // colour stops from the centre (air) outwards to the edge (sub), each placed at the middle
+        // of its band's share, so the dominant bands take up more of the slice
+        juce::ColourGradient grad;
+        grad.isRadial = false;
+        float acc = 0.0f;
+        bool first = true;
+        for (int k = 5; k >= 0; --k)
+        {
+            const float sh = waveShare[(size_t) k];
+            auto col = kWaveBands[k];
+            if (k <= 1)   // kicks deepen the lows toward plum
+                col = col.interpolatedWith (kWaveKick, juce::jlimit (0.0f, 0.75f, waveKickSm * 0.75f));
+            const float p = juce::jlimit (0.0f, 1.0f, acc + sh * 0.5f);
+            if (first) { grad.addColour (0.0, col.brighter (0.25f)); first = false; }
+            if (p > 0.0f && p < 1.0f) grad.addColour ((double) p, col);
+            acc += sh;
+        }
+        // warm edge: the outermost colour melts into amber at the crest
+        const auto outer = kWaveBands[0].interpolatedWith (kWaveKick, juce::jlimit (0.0f, 0.75f, waveKickSm * 0.75f));
+        grad.addColour (1.0, outer.interpolatedWith (kWaveEdge, 0.35f));
+
         waveImg.moveImageSection (0, 0, 1, 0, w - 1, h);
         waveImg.clear ({ w - 1, 0, 1, h });
         juce::Graphics g (waveImg);
         const float xc = (float) (w - 1);
 
-        auto heightOf = [&] (float amp) { return half * std::pow (juce::jlimit (0.0f, 1.0f, amp), 0.72f); };
+        // upper body
+        grad.point1 = { xc, cy };
+        grad.point2 = { xc, cy - body };
+        g.setGradientFill (grad);
+        g.fillRect (xc, cy - body, 1.0f, body);
 
-        // draws one band as a mirrored streak: bright core, soft tip, dimmer reflection below the horizon
-        auto layer = [&] (float hgt, juce::Colour col, float alpha)
+        // warm glow from the body's edge out to the peaks
+        if (halo > body + 0.5f)
         {
-            if (hgt < 0.5f) return;
-            const float core = hgt * 0.78f;
-            g.setColour (col.withAlpha (alpha * 0.40f));                 // soft tip (upper)
-            g.fillRect (xc, cy - hgt, 1.0f, hgt - core);
-            g.setColour (col.withAlpha (alpha));                         // core (upper)
-            g.fillRect (xc, cy - core, 1.0f, core);
-            if (hgt > 3.0f)
-            {
-                g.setColour (col.brighter (0.55f).withAlpha (alpha * 0.9f));   // crisp contour at the crest
-                g.fillRect (xc, std::round (cy - hgt), 1.0f, 1.0f);
-            }
-            const float rh = hgt * 0.82f, rcore = core * 0.82f;          // reflection
-            g.setColour (col.withAlpha (alpha * 0.45f));
-            g.fillRect (xc, cy, 1.0f, rcore);
-            g.setColour (col.withAlpha (alpha * 0.16f));
-            g.fillRect (xc, cy + rcore, 1.0f, rh - rcore);
-        };
-
-        // faint full-signal outline frames the shape
-        layer (heightOf (wPeak), juce::Colour (0xff8fa6c8), 0.16f);
-
-        // bands from the widest (bass) to the narrowest (air), so the bright highs sit on top at the centre
-        const float rmsBand0 = std::sqrt (wBand[0] / (float) samplesPerCol) * 1.41f * kWaveGain[0];
-        layer (heightOf (rmsBand0), kWaveBands[0], 0.92f);
-
-        // kick hits: a deep purple, almost black body inside the blue, outlined in violet
-        if (wKick > 0.01f)
-        {
-            const float kh = heightOf (wKick * 1.3f);
-            const float a = juce::jlimit (0.0f, 1.0f, wKick * 4.0f);
-            g.setColour (kWaveKickRim.withAlpha (0.85f * a));
-            g.fillRect (xc, cy - kh - 1.5f, 1.0f, 2.0f);
-            g.fillRect (xc, cy + kh * 0.82f - 0.5f, 1.0f, 2.0f);
-            g.setColour (kWaveKick.withAlpha (0.92f * a));
-            g.fillRect (xc, cy - kh, 1.0f, kh);
-            g.setColour (kWaveKick.withAlpha (0.70f * a));
-            g.fillRect (xc, cy, 1.0f, kh * 0.82f);
+            g.setGradientFill (juce::ColourGradient (kWaveEdge.withAlpha (0.38f), xc, cy - body,
+                                                     kWaveEdge.withAlpha (0.0f), xc, cy - halo, false));
+            g.fillRect (xc, cy - halo, 1.0f, halo - body);
         }
 
-        const float alphas[5] = { 0.80f, 0.85f, 0.90f, 0.95f, 1.0f };
-        for (size_t k = 1; k < 5; ++k)
-        {
-            const float rms = std::sqrt (wBand[k] / (float) samplesPerCol) * 1.41f * kWaveGain[k];
-            layer (heightOf (rms), kWaveBands[k], alphas[k]);
-        }
+        // reflection below the horizon: same colours, softer, fading into the dark
+        const float rb = body * 0.85f;
+        auto refl = grad;
+        refl.point1 = { xc, cy };
+        refl.point2 = { xc, cy + rb };
+        refl.multiplyOpacity (0.42f);
+        g.setGradientFill (refl);
+        g.fillRect (xc, cy, 1.0f, rb);
+        g.setGradientFill (juce::ColourGradient (juce::Colours::transparentBlack, xc, cy,
+                                                 juce::Colour (0xff02030a).withAlpha (0.55f), xc, cy + rb, false));
+        g.fillRect (xc, cy, 1.0f, rb);
 
         waveColCount = 0;
         wPeak = wKick = 0.0f;
@@ -856,9 +869,9 @@ void SpectrumAnalyzer::drawWaveform (juce::Graphics& g)
     const float cy = std::round (plot.getCentreY());
     juce::ColourGradient hz (juce::Colour (0xff2e8bff).withAlpha (0.0f), plot.getX(), cy,
                              juce::Colour (0xff2e8bff).withAlpha (0.0f), plot.getRight(), cy, false);
-    hz.addColour (0.20, juce::Colour (0xffff8a24).withAlpha (0.35f));
-    hz.addColour (0.45, juce::Colour (0xfffff1d6).withAlpha (0.55f));
-    hz.addColour (0.75, juce::Colour (0xff6fc3ff).withAlpha (0.35f));
+    hz.addColour (0.20, juce::Colour (0xffffa63e).withAlpha (0.22f));
+    hz.addColour (0.45, juce::Colour (0xffffe8c2).withAlpha (0.38f));
+    hz.addColour (0.75, juce::Colour (0xff8fb8ff).withAlpha (0.22f));
     g.setGradientFill (hz);
     g.fillRect (plot.getX(), cy - 3.0f, plot.getWidth(), 7.0f);
     hz.multiplyOpacity (1.8f);
