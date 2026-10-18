@@ -6,12 +6,16 @@ using namespace MT;
 //==============================================================================
 MagicTouchProcessor::MagicTouchProcessor()
     : AudioProcessor (BusesProperties()
-                          .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
-                          .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
+                          .withInput  ("Input",     juce::AudioChannelSet::stereo(), true)
+                          .withOutput ("Output",    juce::AudioChannelSet::stereo(), true)
+                          .withInput  ("Sidechain", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, nullptr, "MAGICTOUCH", createLayout())
 {
     for (size_t i = 0; i < kParams.size(); ++i)
         raw[i] = apvts.getRawParameterValue (kParams[i].id);
+
+    outGainRaw = apvts.getRawParameterValue ("outGain");
+    scExtRaw   = apvts.getRawParameterValue ("scExt");
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout MagicTouchProcessor::createLayout()
@@ -40,14 +44,34 @@ juce::AudioProcessorValueTreeState::ParameterLayout MagicTouchProcessor::createL
             p.def, attrs));
     }
 
+    // Master output volume: not part of the presets, so it stays put while you browse them
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "outGain", 1 }, "Output",
+        juce::NormalisableRange<float> (-36.0f, 6.0f, 0.1f), 0.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction ([] (float v, int) { return (v > 0.0f ? "+" : "") + juce::String (v, 1) + " dB"; })
+            .withValueFromStringFunction ([] (const juce::String& t) { return t.getFloatValue(); })));
+
+    // Compressor detector listens to the external sidechain input instead of the mix
+    layout.add (std::make_unique<juce::AudioParameterBool> (
+        juce::ParameterID { "scExt", 1 }, "Ext Sidechain", false));
+
     return layout;
 }
 
 //==============================================================================
 bool MagicTouchProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
-    return layouts.getMainOutputChannelSet() == juce::AudioChannelSet::stereo()
-        && layouts.getMainInputChannelSet()  == juce::AudioChannelSet::stereo();
+    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo()
+        || layouts.getMainInputChannelSet() != juce::AudioChannelSet::stereo())
+        return false;
+
+    if (layouts.inputBuses.size() > 1)
+    {
+        const auto sc = layouts.getChannelSet (true, 1);
+        return sc.isDisabled() || sc == juce::AudioChannelSet::mono() || sc == juce::AudioChannelSet::stereo();
+    }
+    return true;
 }
 
 void MagicTouchProcessor::prepareToPlay (double sampleRate, int)
@@ -110,8 +134,51 @@ void MagicTouchProcessor::prepareToPlay (double sampleRate, int)
     prep (smCompMix, P (pCompMix) * 0.01f);
     prep (smLoud,    juce::Decibels::decibelsToGain (P (pLoudness)));
     prep (smMix,     P (pMix)     * 0.01f);
+    prep (smOut,     juce::Decibels::decibelsToGain (outGainRaw->load()));
 
-    fifoIdx = 0;
+    // Metering
+    rmsCoef = 1.0f - (float) std::exp (-1.0 / (sr * 0.3));
+    msInL = msInR = msOutL = msOutR = 0.0f;
+
+    // K-weighting (ITU-R BS.1770-4), designed for the current sample rate from the
+    // standard's analogue prototype so it matches the reference coefficients at 48 kHz
+    Coeffs::Ptr ks, kh;
+    {
+        const double K  = std::tan (juce::MathConstants<double>::pi * 1681.974450955533 / sr);
+        const double Q  = 0.7071752369554196;
+        const double Vh = std::pow (10.0, 3.999843853973347 / 20.0);
+        const double Vb = std::pow (Vh, 0.4996667741545416);
+        ks = new Coeffs ((float) (Vh + Vb * K / Q + K * K), (float) (2.0 * (K * K - Vh)), (float) (Vh - Vb * K / Q + K * K),
+                         (float) (1.0 + K / Q + K * K),      (float) (2.0 * (K * K - 1.0)), (float) (1.0 - K / Q + K * K));
+    }
+    {
+        const double K = std::tan (juce::MathConstants<double>::pi * 38.13547087602444 / sr);
+        const double Q = 0.5003270373238773;
+        kh = new Coeffs (1.0f, -2.0f, 1.0f,
+                         (float) (1.0 + K / Q + K * K), (float) (2.0 * (K * K - 1.0)), (float) (1.0 - K / Q + K * K));
+    }
+    for (size_t ch = 0; ch < 2; ++ch)
+    {
+        kShelf[ch].reset(); kShelf[ch].coefficients = ks;
+        kHigh[ch].reset();  kHigh[ch].coefficients  = kh;
+    }
+    loudBuf.assign ((size_t) juce::jmax (1, (int) std::round (sr * 3.0)), 0.0f);
+    n400 = juce::jmax (1, (int) std::round (sr * 0.4));
+    loudIdx = 0;
+    sum400 = sum3s = 0.0;
+
+    ringIn.fill (0.0f);
+    ringOut.fill (0.0f);
+    ringPos.store (0);
+}
+
+void MagicTouchProcessor::copyAnalyserData (float* dest, int n, bool input) const
+{
+    const auto& ring = input ? ringIn : ringOut;
+    n = juce::jmin (n, ringSize);
+    const int end = ringPos.load (std::memory_order_acquire);
+    for (int i = 0; i < n; ++i)
+        dest[i] = ring[(size_t) ((end - n + i) & (ringSize - 1))];
 }
 
 //==============================================================================
@@ -149,12 +216,28 @@ void MagicTouchProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
 {
     juce::ScopedNoDenormals noDenormals;
 
-    if (buffer.getNumChannels() < 2)
+    auto mainBuf = getBusBuffer (buffer, true, 0);
+    if (mainBuf.getNumChannels() < 2)
         return;
 
     const int numSamples = buffer.getNumSamples();
-    float* dataL = buffer.getWritePointer (0);
-    float* dataR = buffer.getWritePointer (1);
+    float* dataL = mainBuf.getWritePointer (0);
+    float* dataR = mainBuf.getWritePointer (1);
+
+    // ---- External sidechain
+    const float* scInL = nullptr;
+    const float* scInR = nullptr;
+    if (getBusCount (true) > 1)
+    {
+        auto scBuf = getBusBuffer (buffer, true, 1);
+        if (scBuf.getNumChannels() > 0)
+        {
+            scInL = scBuf.getReadPointer (0);
+            scInR = scBuf.getNumChannels() > 1 ? scBuf.getReadPointer (1) : scInL;
+        }
+    }
+    scConnected.store (scInL != nullptr);
+    const bool useExtSc = scInL != nullptr && scExtRaw->load() > 0.5f;
 
     auto P = [this] (int i) { return raw[(size_t) i]->load(); };
 
@@ -213,12 +296,14 @@ void MagicTouchProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     smCompMix.setTargetValue (P (pCompMix) * 0.01f);
     smLoud.setTargetValue    (juce::Decibels::decibelsToGain (P (pLoudness)));
     smMix.setTargetValue     (P (pMix)     * 0.01f);
+    smOut.setTargetValue     (juce::Decibels::decibelsToGain (outGainRaw->load()));
 
     // ---- Compressor settings
     const float thresh = P (pCompThresh);
     const float ratio  = P (pCompRatio);
     const float slope  = 1.0f - 1.0f / ratio;
-    const float makeup = -thresh * slope * 0.4f;     // partial auto make-up
+    // partial auto make-up (off when ducking from an external sidechain, so quiet parts aren't boosted)
+    const float makeup = useExtSc ? 0.0f : -thresh * slope * 0.4f;
     const float knee   = 6.0f;
     const float atkC   = (float) std::exp (-1.0 / (sr * 0.001 * (double) P (pCompAttack)));
     const float relC   = (float) std::exp (-1.0 / (sr * 0.001 * (double) P (pCompRelease)));
@@ -228,7 +313,8 @@ void MagicTouchProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     const float rc      = (float) std::exp (-1.0 / (sr * 0.001 * (double) P (pLimRelease)));
 
     float pInL = 0.0f, pInR = 0.0f, pOutL = 0.0f, pOutR = 0.0f;
-    float grMax = 0.0f, limMin = 1.0f;
+    float grMax = 0.0f, limMin = 1.0f, pSc = 0.0f;
+    int rp = ringPos.load (std::memory_order_relaxed);
 
     for (int i = 0; i < numSamples; ++i)
     {
@@ -266,8 +352,17 @@ void MagicTouchProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
 
         // 4) Glue compressor: stereo-linked, soft knee, high-passed sidechain, parallel blend
         {
-            const float scL = scHp[0].processSample (l);
-            const float scR = scHp[1].processSample (r);
+            float srcL = l, srcR = r;
+            if (scInL != nullptr)
+            {
+                const float eL = scInL[i], eR = scInR[i];
+                pSc = std::max (pSc, std::max (std::abs (eL), std::abs (eR)));
+                if (useExtSc) { srcL = eL; srcR = eR; }
+            }
+            // the SC HPF shapes the internal detector; an external key (e.g. a kick) is used full-range for ducking
+            float scL = scHp[0].processSample (srcL);
+            float scR = scHp[1].processSample (srcR);
+            if (useExtSc) { scL = srcL; scR = srcR; }
             const float det = std::max (std::abs (scL), std::abs (scR));
             const float lvl = juce::Decibels::gainToDecibels (det, -100.0f);
             const float cc = lvl > compEnv ? atkC : relC;
@@ -339,8 +434,9 @@ void MagicTouchProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
 
         // 8) Global dry/wet (dry is delayed to stay phase-aligned with the limiter)
         const float mx = smMix.getNextValue();
-        const float outL = dL + (oL - dL) * mx;
-        const float outR = dR + (oR - dR) * mx;
+        const float og = smOut.getNextValue();   // 9) master output volume
+        const float outL = (dL + (oL - dL) * mx) * og;
+        const float outR = (dR + (oR - dR) * mx) * og;
         dataL[i] = outL;
         dataR[i] = outR;
         wpos = rd;
@@ -348,15 +444,43 @@ void MagicTouchProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         pOutL = std::max (pOutL, std::abs (outL));
         pOutR = std::max (pOutR, std::abs (outR));
 
-        // Analyser feed
-        fifo[(size_t) fifoIdx++] = 0.5f * (outL + outR);
-        if (fifoIdx >= fftSize)
+        // RMS
+        msInL  += (inL * inL   - msInL)  * rmsCoef;
+        msInR  += (inR * inR   - msInR)  * rmsCoef;
+        msOutL += (outL * outL - msOutL) * rmsCoef;
+        msOutR += (outR * outR - msOutR) * rmsCoef;
+
+        // K-weighted loudness: sliding 400 ms and 3 s windows of summed channel power
         {
-            fftSnapshot = fifo;
-            fftReady.store (true);
-            fifoIdx = 0;
+            const float kl = kHigh[0].processSample (kShelf[0].processSample (outL));
+            const float kr = kHigh[1].processSample (kShelf[1].processSample (outR));
+            const float pw = kl * kl + kr * kr;
+            const int size = (int) loudBuf.size();
+            sum400 += (double) pw - (double) loudBuf[(size_t) ((loudIdx - n400 + size) % size)];
+            sum3s  += (double) pw - (double) loudBuf[(size_t) loudIdx];
+            loudBuf[(size_t) loudIdx] = pw;
+            loudIdx = (loudIdx + 1) % size;
         }
+
+        // Analyser feed
+        ringIn[(size_t) rp]  = 0.5f * (inL + inR);
+        ringOut[(size_t) rp] = 0.5f * (outL + outR);
+        rp = (rp + 1) & (ringSize - 1);
     }
+    ringPos.store (rp, std::memory_order_release);
+
+    // Guard against tiny negative sums from floating point drift
+    sum400 = std::max (0.0, sum400);
+    sum3s  = std::max (0.0, sum3s);
+    auto toLufs = [] (double sum, int n) { return (float) (-0.691 + 10.0 * std::log10 (sum / (double) n + 1.0e-12)); };
+    lufsM.store (toLufs (sum400, n400));
+    lufsS.store (toLufs (sum3s, (int) loudBuf.size()));
+
+    inRmsL.store  (std::sqrt (msInL));
+    inRmsR.store  (std::sqrt (msInR));
+    outRmsL.store (std::sqrt (msOutL));
+    outRmsR.store (std::sqrt (msOutR));
+    scPeak.store  (std::max (scPeak.load(), pSc));
 
     // Publish meters (accumulated; the editor resets them)
     inPeakL.store  (std::max (inPeakL.load(),  pInL));

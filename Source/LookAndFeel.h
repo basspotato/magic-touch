@@ -8,6 +8,17 @@ inline juce::Font uiFont (float height, bool bold = false)
     return juce::Font (juce::FontOptions (height, bold ? juce::Font::bold : juce::Font::plain));
 }
 
+// Colour themes: one per knob colour, plus the original level-reactive hue shift
+struct Theme { const char* name; juce::uint32 argb; };   // argb == 0 -> reactive
+inline constexpr Theme kThemes[] =
+{
+    { "Reactive", 0 },
+    { "Azure",   0xff3ba7ff }, { "Lagoon",  0xff35d0c4 }, { "Lime",    0xffa8e05f }, { "Ice",     0xffa0e7ff },
+    { "Amber",   0xffffa63d }, { "Ember",   0xffff7a45 }, { "Magenta", 0xffff5cb8 }, { "Violet",  0xffb583ff },
+    { "Indigo",  0xff6c8cff }, { "Crimson", 0xffff5252 }
+};
+inline constexpr int kNumThemes = (int) (sizeof (kThemes) / sizeof (kThemes[0]));
+
 class MagicLookAndFeel : public juce::LookAndFeel_V4
 {
 public:
@@ -82,8 +93,12 @@ public:
         }
 
         const float cx = (float) x + (float) w * 0.5f;
-        const float top = juce::jmin (minPos, maxPos) - 6.0f;
-        const float bottom = juce::jmax (minPos, maxPos) + 6.0f;
+        // minPos/maxPos are only meaningful for two-value sliders, so take the track ends from the range itself
+        juce::ignoreUnused (minPos, maxPos);
+        const float pLo = (float) s.getPositionOfValue (s.getMinimum());
+        const float pHi = (float) s.getPositionOfValue (s.getMaximum());
+        const float top = juce::jmin (pLo, pHi) - 6.0f;
+        const float bottom = juce::jmax (pLo, pHi) + 6.0f;
         const auto col = s.findColour (juce::Slider::thumbColourId);
         const bool hot = s.isMouseOverOrDragging();
 

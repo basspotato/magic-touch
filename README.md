@@ -11,6 +11,25 @@ Bass, Body, Presence, Air, Tube, Tape, Exciter, Width, Bass Mono, Punch
 ## 10 sliders (Dynamics & Output)
 Thresh, Ratio, Attack, Release, Blend (parallel), SC HPF, Loudness, Ceiling, Lim Rel, Dry/Wet
 
+## Top bar
+- **Theme**: click to pick a colour theme (Reactive, or one of the ten knob colours).
+  Saved with your session and remembered as the default for new instances.
+- **Output**: master output volume (-36 to +6 dB, double-click for 0 dB). Applied last,
+  after the limiter, and not changed by presets.
+
+## Sidechain
+Magic Touch has a stereo sidechain input. Route a kick (or any track) to it in your DAW,
+then switch on **EXT SIDECHAIN** in the Dynamics panel: the glue compressor then ducks
+the mix from that signal (SC HPF is bypassed for the external key, and auto make-up is off).
+The pill's light is amber when the switch is on but nothing is routed to the sidechain.
+
+## Meters & analyser
+- LEVELS: segmented peak + RMS meters for input/output with peak holds and clip lights,
+  compressor and limiter gain reduction, sidechain level, and readouts for output peak,
+  momentary (LUFS M) and short-term (LUFS S) loudness. Click the readouts to reset.
+- ANALYZER: 1/6-octave smoothed output spectrum with peak hold, input spectrum for
+  comparison (click IN to hide it), 3 dB/oct tilt, and a hover readout (Hz, note, dB).
+
 ## 20 presets
 Click the preset name in the top bar (or the arrows). Defined in Source/Params.h, easy to edit.
 

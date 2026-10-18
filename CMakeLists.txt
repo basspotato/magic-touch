@@ -35,7 +35,9 @@ target_sources(MagicTouch PRIVATE
     Source/PluginProcessor.h
     Source/PluginProcessor.cpp
     Source/PluginEditor.h
-    Source/PluginEditor.cpp)
+    Source/PluginEditor.cpp
+    Source/SpectrumAnalyzer.h
+    Source/SpectrumAnalyzer.cpp)
 
 target_compile_definitions(MagicTouch PUBLIC
     JUCE_WEB_BROWSER=0

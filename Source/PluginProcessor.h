@@ -22,6 +22,7 @@ class MagicTouchProcessor : public juce::AudioProcessor
 public:
     static constexpr int fftOrder = 11;
     static constexpr int fftSize  = 1 << fftOrder;
+    static constexpr int ringSize = 8192;   // analyser history (power of two)
 
     MagicTouchProcessor();
     ~MagicTouchProcessor() override = default;
@@ -54,13 +55,18 @@ public:
 
     juce::AudioProcessorValueTreeState apvts;
 
+    // Copies the most recent n samples (mono sum) of the input or output into dest
+    void copyAnalyserData (float* dest, int n, bool input) const;
+
     // Read by the editor (accumulated peaks; the editor resets them with exchange(0))
     std::atomic<float> inPeakL { 0.0f }, inPeakR { 0.0f }, outPeakL { 0.0f }, outPeakR { 0.0f };
     std::atomic<float> compGR { 0.0f }, limGR { 0.0f };   // positive dB of gain reduction
+    std::atomic<float> scPeak { 0.0f };                   // external sidechain input peak
 
-    // Spectrum analyser hand-off
-    std::array<float, fftSize> fftSnapshot {};
-    std::atomic<bool> fftReady { false };
+    // Current values (not reset by the editor)
+    std::atomic<float> inRmsL { 0.0f }, inRmsR { 0.0f }, outRmsL { 0.0f }, outRmsR { 0.0f };
+    std::atomic<float> lufsM { -100.0f }, lufsS { -100.0f };   // momentary (400 ms) / short-term (3 s)
+    std::atomic<bool>  scConnected { false };                  // host is feeding the sidechain bus
 
 private:
     using Filter = juce::dsp::IIR::Filter<float>;
@@ -72,6 +78,8 @@ private:
     float exciteStage (float x, size_t ch, float amount);
 
     std::array<std::atomic<float>*, MT::kNumParams> raw {};
+    std::atomic<float>* outGainRaw = nullptr;
+    std::atomic<float>* scExtRaw   = nullptr;
     double sr = 44100.0;
 
     // EQ / colour
@@ -84,7 +92,7 @@ private:
     bool bassMonoOn = false;
 
     // Smoothed controls
-    juce::SmoothedValue<float> smTube, smTape, smExcite, smWidth, smPunch, smCompMix, smLoud, smMix;
+    juce::SmoothedValue<float> smTube, smTape, smExcite, smWidth, smPunch, smCompMix, smLoud, smMix, smOut;
 
     // Transient shaper + compressor state
     float fastA = 0, fastR = 0, slowA = 0, slowR = 0;
@@ -97,9 +105,16 @@ private:
     double rSum = 0.0;
     float  rPrev = 1.0f;
 
-    // Analyser FIFO
-    std::array<float, fftSize> fifo {};
-    int fifoIdx = 0;
+    // Analyser history rings
+    std::array<float, ringSize> ringIn {}, ringOut {};
+    std::atomic<int> ringPos { 0 };
+
+    // Metering: RMS (300 ms) and K-weighted loudness
+    float msInL = 0, msInR = 0, msOutL = 0, msOutR = 0, rmsCoef = 0.0f;
+    std::array<Filter, 2> kShelf, kHigh;
+    std::vector<float> loudBuf;
+    int loudIdx = 0, n400 = 1;
+    double sum400 = 0.0, sum3s = 0.0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MagicTouchProcessor)
 };
