@@ -512,10 +512,21 @@ void SpectrumAnalyzer::buildStatic()
                 g.fillEllipse (bx - br, by - br, br * 2.0f, br * 2.0f);
             }
             const float cy = std::round (plot.getCentreY()), half = plot.getHeight() * 0.47f;
-            for (float a : { 0.5f, -0.5f })   // -6 dB guides
+            // dB scale, mirrored above and below the centre line, at the exact heights the
+            // waveform draws those peak levels (height = half * amplitude^0.75)
+            g.setFont (uiFont (8.0f));
+            for (int db : { 0, -3, -6, -12, -24 })
             {
-                g.setColour (juce::Colours::white.withAlpha (0.05f));
-                g.fillRect (plot.getX(), std::round (cy - a * half), plot.getWidth(), 1.0f);
+                const float off = half * std::pow (juce::Decibels::decibelsToGain ((float) db), 0.75f);
+                for (int sgn : { -1, 1 })
+                {
+                    const float y = std::round (cy + (float) sgn * off);
+                    g.setColour (juce::Colours::white.withAlpha (db == 0 ? 0.09f : 0.05f));
+                    g.fillRect (plot.getX(), y, plot.getWidth(), 1.0f);
+                    g.setColour (juce::Colours::white.withAlpha (0.32f));
+                    g.drawText (db == 0 ? juce::String ("0") : juce::String (db), (int) plot.getRight() + 2, (int) y - 6, 28, 12,
+                                juce::Justification::centredLeft, false);
+                }
             }
             g.setFont (uiFont (8.5f));
             for (int sec = 0; sec <= 5; ++sec)   // time ruler, newest audio on the right
@@ -528,9 +539,6 @@ void SpectrumAnalyzer::buildStatic()
                 g.drawText (sec == 0 ? juce::String ("NOW") : "-" + juce::String (sec) + "s", (int) x - 18, (int) plot.getBottom() + 4, 36, 12,
                             juce::Justification::centred, false);
             }
-            g.setColour (juce::Colours::white.withAlpha (0.30f));
-            g.drawText ("0 dB", (int) plot.getRight() + 2, (int) (cy - half) - 6, 28, 12, juce::Justification::centredLeft, false);
-            g.drawText ("-6",   (int) plot.getRight() + 2, (int) (cy - 0.5f * half) - 6, 28, 12, juce::Justification::centredLeft, false);
             break;
         }
 
@@ -842,17 +850,18 @@ void SpectrumAnalyzer::feedWaveform()
             g.fillRect (xc, cy - halo, 1.0f, halo - body);
         }
 
-        // reflection below the horizon: same colours, softer, fading into the dark
-        const float rb = body * 0.85f;
-        auto refl = grad;
-        refl.point1 = { xc, cy };
-        refl.point2 = { xc, cy + rb };
-        refl.multiplyOpacity (0.42f);
-        g.setGradientFill (refl);
-        g.fillRect (xc, cy, 1.0f, rb);
-        g.setGradientFill (juce::ColourGradient (juce::Colours::transparentBlack, xc, cy,
-                                                 juce::Colour (0xff02030a).withAlpha (0.55f), xc, cy + rb, false));
-        g.fillRect (xc, cy, 1.0f, rb);
+        // lower half: an exact mirror of the top (same colours, brightness and height)
+        auto lower = grad;
+        lower.point1 = { xc, cy };
+        lower.point2 = { xc, cy + body };
+        g.setGradientFill (lower);
+        g.fillRect (xc, cy, 1.0f, body);
+        if (halo > body + 0.5f)
+        {
+            g.setGradientFill (juce::ColourGradient (kWaveEdge.withAlpha (0.38f), xc, cy + body,
+                                                     kWaveEdge.withAlpha (0.0f), xc, cy + halo, false));
+            g.fillRect (xc, cy + body, 1.0f, halo - body);
+        }
 
         waveColCount = 0;
         wPeak = wKick = 0.0f;

@@ -46,7 +46,7 @@ The pill's light is amber when the switch is on but nothing is routed to the sid
   Spectral Cloud, Waveform (the song scrolling past; each slice is a smooth gradient that
   follows the band balance: sub 20-60 Hz indigo, bass 60-250 azure, low-mids 250-500 orchid,
   mids 500-2k coral, presence 2-6k amber, air 6-20k warm cream, with warm glowing edges,
-  kicks deepening toward plum, and a reflection), Spectrogram (scrolling heat map) and
+  kicks deepening toward plum; full symmetric waveform with a mirrored dB scale), Spectrogram (scrolling heat map) and
   1/3-Octave RTA.
 - Every theme is music-reactive: the theme colour brightens and leans in hue with level,
   the glow and particles between panels breathe with the music, and panel rims light up.
