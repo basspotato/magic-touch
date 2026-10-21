@@ -926,9 +926,10 @@ void SpectrumAnalyzer::drawRta (juce::Graphics& g, bool staticPart)
 {
     auto segColour = [] (float db)
     {
-        if (db > -6.0f)  return juce::Colour (0xffff3b4f);
-        if (db > -18.0f) return juce::Colour (0xffffd54a);
-        return juce::Colour (0xff2fe08c);
+        // same orange -> yellow -> red fade as the level meters
+        if (db > -6.0f)  return MT::col::faceRed;
+        if (db > -18.0f) return MT::col::yellow;
+        return MT::col::orange;
     };
     const float bottom = plot.getBottom();
 
