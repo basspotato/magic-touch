@@ -50,7 +50,7 @@ Resources/Fonts/        — Barlow Condensed, Share Tech Mono (binary data via j
 
 - The GUI is branded POTATO MAGIC (the plugin/product name is still Magic Touch).
 - Potato-Kicker "light-up console" style: near-black tiles with ramp borders, top light strip and corner brackets; glow text; Barlow Condensed labels, Share Tech Mono values.
-- Fixed Potato-Kicker palette (no theme picker): light ramp orange -> yellow. The aura, particles and panel rim lights still react to the music, in the same orange.
+- Fixed Potato-Kicker palette (no theme picker): light ramp orange -> yellow. The GUI does NOT react to the music: the glow and panel rim lights are static orange, there are no particles, and only the meters, analyzer and EQ display animate.
 - Knobs: Kicker lit knob (black glossy cap, backlit ring + ticks that light along the ramp as the value rises; bipolar knobs light from zero). Ramp colours come from the slider's rotarySliderFillColourId (start) / rotarySliderOutlineColourId (end). Knob cells are buffered to images, so the ring only re-renders when a knob moves or the ramp changes.
 - Faders: backlit ramp along the track, intensifying with value (compressor orange -> yellow, limiter orange -> red, output yellow -> white). Group headers (GLUE COMPRESSOR / LIMITER / OUT) are glow labels with fading rules, and lit divider lines with LEDs separate the groups. All of it is drawn in the cached background, so no extra repaint cost.
 - Analyzer: dropdown with 6 display modes including scrolling Waveform.

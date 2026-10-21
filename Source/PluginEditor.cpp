@@ -268,15 +268,6 @@ MagicTouchEditor::MagicTouchEditor (MagicTouchProcessor& p)
 
     spec.fill (-120.0f);
 
-    for (auto& pt : particles)
-    {
-        pt.x = rng.nextFloat() * 1100.0f;
-        pt.y = rng.nextFloat() * 720.0f;
-        pt.speed = 0.15f + rng.nextFloat() * 0.6f;
-        pt.size = 1.5f + rng.nextFloat() * 3.0f;
-        pt.phase = rng.nextFloat() * 6.28f;
-    }
-
     // controls keep a cached image of themselves and only re-render when they move,
     // so the music-reactive background can refresh around them cheaply
     for (auto& k : knobs)  k->setBufferedToImage (true);
@@ -394,31 +385,7 @@ void MagicTouchEditor::timerCallback()
 
     updateSpectrum (dt);
 
-    // reactive visuals: level drives the aura, low-end energy drives particles
-    const float lvlTarget = juce::jmap (juce::jlimit (-40.0f, 0.0f, outNow), -40.0f, 0.0f, 0.0f, 1.0f);
-    level += (lvlTarget - level) * (1.0f - std::exp (-dt / 0.26f));
-
-    const double srate = proc.getSampleRate() > 0.0 ? proc.getSampleRate() : 44100.0;
-    const int bassBins = juce::jlimit (2, (int) spec.size() - 2, (int) (150.0 * MagicTouchProcessor::fftSize / srate));
-    float bassDb = -120.0f;
-    for (int i = 1; i < bassBins; ++i)
-        bassDb = std::max (bassDb, spec[(size_t) i]);
-    const float bassTarget = juce::jmap (juce::jlimit (-50.0f, -8.0f, bassDb), -50.0f, -8.0f, 0.0f, 1.0f);
-    bass += (bassTarget - bass) * (1.0f - std::exp (-dt / 0.15f));
-
-    const float frames = dt * 30.0f;   // particle motion was tuned at 30 fps
-    for (auto& pt : particles)
-    {
-        pt.y -= pt.speed * (0.4f + bass * 3.0f) * frames;
-        pt.phase += 0.05f * frames;
-        if (pt.y < -10.0f)
-        {
-            pt.y = (float) getHeight() + 10.0f;
-            pt.x = rng.nextFloat() * (float) getWidth();
-        }
-    }
-
-    // push the music-reactive accent to the analyzer
+    // the analyzer and glow use the fixed Kicker orange (the GUI no longer reacts to the music)
     const auto accent = liveAccent();
     analyzer.setAccent (accent);
     analyzer.update (dt);
@@ -442,13 +409,7 @@ void MagicTouchEditor::timerCallback()
         return;
     }
 
-    // ---- the reactive glow, particles and titles behind/around the panels refresh at 15 fps;
-    //      the meters and displays at the full 30 fps
-    if ((++frameCount & 1) == 0)
-    {
-        for (const auto& gr : gapRegion)
-            repaint (gr);
-    }
+    // ---- only the meters and displays refresh (30 fps); the background is static
     repaint (starRect);
     repaint (displayRect.toNearestInt());
     repaint (meterRect.toNearestInt());
@@ -478,14 +439,9 @@ void MagicTouchEditor::updateSpectrum (float dt)
 //==============================================================================
 juce::Colour MagicTouchEditor::liveAccent() const
 {
-    // Potato-Kicker orange that reacts to the music: it leans toward yellow and brightens and saturates
-    // as the music gets louder and the low end hits
+    // fixed Potato-Kicker orange (the idle look; the GUI does not react to the music)
     const juce::Colour b = col::amber;
-    float h = b.getHue() + 0.035f * level + 0.015f * bass;
-    h -= std::floor (h);
-    const float sat = juce::jlimit (0.0f, 1.0f, b.getSaturation() * (0.85f + 0.25f * level));
-    const float bri = juce::jlimit (0.0f, 1.0f, b.getBrightness() * (0.75f + 0.35f * level));
-    return juce::Colour::fromHSV (h, sat, bri, 1.0f).brighter (0.12f * level + 0.08f * bass);
+    return juce::Colour::fromHSV (b.getHue(), b.getSaturation() * 0.85f, b.getBrightness() * 0.75f, 1.0f);
 }
 
 //==============================================================================
@@ -514,7 +470,7 @@ void MagicTouchEditor::paint (juce::Graphics& g)
 
     g.drawImageAt (background, 0, 0);
 
-    // music-reactive layer: glow, drifting motes and panel rim lights, drawn only in the gaps
+    // static glow and panel rim lights, drawn only in the gaps
     // between panels (where they're visible), so it costs a fraction of a full-window effect
     if (gapRegion.intersects (clip))
     {
@@ -522,18 +478,11 @@ void MagicTouchEditor::paint (juce::Graphics& g)
         g.reduceClipRegion (gapRegion);
 
         const auto c = displayRect.getCentre();
-        g.setGradientFill (juce::ColourGradient (accent.withAlpha (0.05f + 0.20f * level + 0.12f * bass), c.x, c.y,
+        g.setGradientFill (juce::ColourGradient (accent.withAlpha (0.05f), c.x, c.y,
                                                  accent.withAlpha (0.0f), c.x + 700.0f, c.y + 300.0f, true));
         g.fillRect (clip);
 
-        for (const auto& pt : particles)
-        {
-            const float a = (0.06f + 0.26f * bass + 0.10f * level) * (0.5f + 0.5f * std::sin (pt.phase));
-            g.setColour (accent.withAlpha (juce::jlimit (0.0f, 1.0f, a)));
-            g.fillEllipse (pt.x, pt.y, pt.size, pt.size);
-        }
-
-        const float rim = juce::jlimit (0.0f, 1.0f, 0.06f + 0.26f * level + 0.18f * bass);
+        const float rim = 0.06f;
         for (const auto& pr : { displayRect, analyzer.getBounds().toFloat(), meterRect, tonePanel.toFloat(), dynPanel.toFloat() })
         {
             g.setColour (accent.withAlpha (rim * 0.25f));
@@ -645,8 +594,8 @@ void MagicTouchEditor::drawTopBar (juce::Graphics& g, juce::Colour accent, bool 
 {
     if (! staticPart)
     {
-        // logo: pulsing four-point sparkle
-        const float pulse = 0.5f + 0.5f * level;
+        // logo: four-point sparkle
+        const float pulse = 0.5f;
         juce::Path star;
         star.addStar ({ 34.0f, 38.0f }, 4, 2.5f + 2.0f * pulse, 9.0f + 5.0f * pulse, 0.0f);
         g.setColour (accent.withAlpha (0.25f));
