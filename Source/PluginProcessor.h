@@ -13,7 +13,7 @@ using ACoeffs = juce::dsp::IIR::ArrayCoefficients<float>;
 
 // Tone EQ band definitions, shared by the DSP and the GUI's response curve
 constexpr float kLowF  = 90.0f,    kLowQ  = 0.70f;
-constexpr float kBodyF = 320.0f,   kBodyQ = 0.80f;
+constexpr float kBodyF = 320.0f,   kBodyQ = 0.55f;
 constexpr float kPresF = 3200.0f,  kPresQ = 0.70f;
 constexpr float kAirF  = 11000.0f, kAirQ  = 0.60f;
 
