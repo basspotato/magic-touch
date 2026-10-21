@@ -8,7 +8,22 @@ constexpr float kPi = juce::MathConstants<float>::pi;
 
 const juce::Colour kCream { 0xfffff1d8 };   // lit white for pointers and key readouts
 
-// Fader colours: glue compressor yellow, limiter red, output white (the fill intensifies with the value)
+// Fader light ramps (bottom -> top), all in the console palette: compressor orange -> yellow,
+// limiter orange -> red, output yellow -> white. The fill intensifies with the value.
+const juce::Colour kFaderLo[10] =
+{
+    col::orange, col::orange, col::orange, col::orange, col::orange, col::orange,
+    col::orange, col::orange, col::orange,
+    col::yellow
+};
+const juce::Colour kFaderHi[10] =
+{
+    col::yellow, col::yellow, col::yellow, col::yellow, col::yellow, col::yellow,
+    col::faceRed, col::faceRed, col::faceRed,
+    juce::Colour (0xfffff1d8)
+};
+
+// Group accents (labels, dividers, gain-reduction bars): compressor yellow, limiter red, output white
 const juce::Colour kFaderColours[10] =
 {
     juce::Colour (0xffffd23f), juce::Colour (0xffffd23f), juce::Colour (0xffffd23f), juce::Colour (0xffffd23f),
@@ -181,12 +196,13 @@ void KnobCell::paint (juce::Graphics& g)
 
 //==============================================================================
 FaderCell::FaderCell (juce::AudioProcessorValueTreeState& apvts, const juce::String& paramId,
-                      const juce::String& t, juce::Colour c)
-    : title (t), colour (c), attachment (apvts, paramId, slider)
+                      const juce::String& t, juce::Colour lo, juce::Colour hi)
+    : title (t), rampLo (lo), rampHi (hi), attachment (apvts, paramId, slider)
 {
     slider.setSliderStyle (juce::Slider::LinearVertical);
     slider.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
-    slider.setColour (juce::Slider::thumbColourId, c);
+    slider.setColour (juce::Slider::trackColourId, lo);
+    slider.setColour (juce::Slider::thumbColourId, hi);
     slider.onValueChange = [this] { repaint(); };
     addAndMakeVisible (slider);
 }
@@ -205,7 +221,7 @@ void FaderCell::paint (juce::Graphics& g)
     g.setFont (uiFont (9.5f, true));
     glowText (g, title.toUpperCase(), topR.expanded (4, 0).toFloat(), juce::Justification::centred, col::ink, 0.22f);
 
-    g.setColour (colour.brighter (0.3f));
+    g.setColour (ramp (rampLo, rampHi, (float) slider.valueToProportionOfLength (slider.getValue())).brighter (0.3f));
     g.setFont (monoFont (10.5f));
     g.drawText (slider.getTextFromValue (slider.getValue()), botR.expanded (4, 0), juce::Justification::centred, false);
 }
@@ -221,7 +237,7 @@ MagicTouchEditor::MagicTouchEditor (MagicTouchProcessor& p)
         knobs[i] = std::make_unique<KnobCell> (proc.apvts, kParams[i].id, kParams[i].name);
         addAndMakeVisible (*knobs[i]);
 
-        faders[i] = std::make_unique<FaderCell> (proc.apvts, kParams[10 + i].id, kParams[10 + i].name, kFaderColours[i]);
+        faders[i] = std::make_unique<FaderCell> (proc.apvts, kParams[10 + i].id, kParams[10 + i].name, kFaderLo[i], kFaderHi[i]);
         addAndMakeVisible (*faders[i]);
     }
 
@@ -577,21 +593,48 @@ void MagicTouchEditor::buildBackground()
         g.drawText ("NO SIDECHAIN ROUTED", scHintRect, juce::Justification::centredRight, false);
     }
 
-    // group labels above the faders
+    // group headers above the faders: a label with a thin rule either side, like the section titles
     auto group = [&] (int a, int b, const juce::String& text, juce::Colour c)
     {
-        const int x0 = faders[(size_t) a]->getX() + 4;
-        const int x1 = faders[(size_t) b]->getRight() - 4;
-        const int y = dynPanel.getY() + 34;
-        g.setColour (c.withAlpha (0.65f));
-        g.setFont (uiFont (9.5f, true).withExtraKerningFactor (0.15f));
-        g.drawText (text, x0, y, x1 - x0, 12, juce::Justification::centred, false);
-        g.setColour (c.withAlpha (0.25f));
-        g.fillRect (x0, y + 15, x1 - x0, 1);
+        const float x0 = (float) faders[(size_t) a]->getX() + 6.0f;
+        const float x1 = (float) faders[(size_t) b]->getRight() - 6.0f;
+        const float cy = (float) dynPanel.getY() + 40.0f;
+        const auto f = uiFont (9.5f, true).withExtraKerningFactor (0.15f);
+        const float tw = juce::GlyphArrangement::getStringWidth (f, text) + 14.0f;
+        const float mid = 0.5f * (x0 + x1), l = mid - tw * 0.5f, rt = mid + tw * 0.5f;
+        if (l - x0 > 4.0f)
+        {
+            g.setGradientFill (juce::ColourGradient (c.withAlpha (0.0f), x0, cy, c.withAlpha (0.5f), l, cy, false));
+            g.fillRect (x0, cy, l - x0, 1.0f);
+            g.setGradientFill (juce::ColourGradient (c.withAlpha (0.5f), rt, cy, c.withAlpha (0.0f), x1, cy, false));
+            g.fillRect (rt, cy, x1 - rt, 1.0f);
+        }
+        g.setFont (f);
+        glowText (g, text, juce::Rectangle<float> (l + 4.0f, cy - 7.0f, tw - 8.0f, 14.0f), juce::Justification::centred, c, 0.22f);
     };
     group (0, 5, "GLUE COMPRESSOR", kFaderColours[0]);
     group (6, 8, "LIMITER", kFaderColours[6]);
     group (9, 9, "OUT", kFaderColours[9]);
+
+    // dividing lines between the groups (compressor | limiter | out): a lit rule fading out at both ends, with an LED on each end
+    auto divider = [&] (int lastOfLeftGroup)
+    {
+        const float x = std::round ((float) faders[(size_t) lastOfLeftGroup]->getRight());
+        const float y0 = (float) dynPanel.getY() + 34.0f, y1 = (float) dynPanel.getBottom() - 14.0f;
+        auto line = juce::ColourGradient (rampLo.withAlpha (0.0f), x, y0, rampHi.withAlpha (0.0f), x, y1, false);
+        line.addColour (0.12, rampLo.withAlpha (0.6f));
+        line.addColour (0.88, rampHi.withAlpha (0.6f));
+        auto bloom = line;
+        bloom.multiplyOpacity (0.22f);
+        g.setGradientFill (bloom);
+        g.fillRoundedRectangle (x - 2.5f, y0, 6.0f, y1 - y0, 3.0f);
+        g.setGradientFill (line);
+        g.fillRect (x, y0, 1.0f, y1 - y0);
+        drawLed (g, juce::Rectangle<float> (4.0f, 4.0f).withCentre ({ x + 0.5f, y0 }), true, rampLo);
+        drawLed (g, juce::Rectangle<float> (4.0f, 4.0f).withCentre ({ x + 0.5f, y1 }), true, rampHi);
+    };
+    divider (5);
+    divider (8);
 
     bgPreset = proc.getCurrentPreset();
     lastBgBuildMs = juce::Time::getMillisecondCounterHiRes();

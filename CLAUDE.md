@@ -50,7 +50,7 @@ Resources/Fonts/        — Barlow Condensed, Share Tech Mono (binary data via j
 - Potato-Kicker "light-up console" style: near-black tiles with ramp borders, top light strip and corner brackets; glow text; Barlow Condensed labels, Share Tech Mono values.
 - Fixed Potato-Kicker palette (no theme picker): light ramp orange -> yellow. The aura, particles and panel rim lights still react to the music, in the same orange.
 - Knobs: Kicker lit knob (black glossy cap, backlit ring + ticks that light along the ramp as the value rises; bipolar knobs light from zero). Ramp colours come from the slider's rotarySliderFillColourId (start) / rotarySliderOutlineColourId (end). Knob cells are buffered to images, so the ring only re-renders when a knob moves or the ramp changes.
-- Faders: compressor = yellow, limiter = red, output = white; gradient fill intensifies with value.
+- Faders: backlit ramp along the track, intensifying with value (compressor orange -> yellow, limiter orange -> red, output yellow -> white). Group headers (GLUE COMPRESSOR / LIMITER / OUT) are glow labels with fading rules, and lit divider lines with LEDs separate the groups. All of it is drawn in the cached background, so no extra repaint cost.
 - Analyzer: dropdown with 6 display modes including scrolling Waveform.
 - RMS meter to the left of the sidechain meter.
 - Level meters fade orange (low) -> yellow -> red (top), per segment, by dB.

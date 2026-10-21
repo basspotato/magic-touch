@@ -43,7 +43,7 @@ class FaderCell : public juce::Component
 {
 public:
     FaderCell (juce::AudioProcessorValueTreeState& apvts, const juce::String& paramId,
-               const juce::String& title, juce::Colour colour);
+               const juce::String& title, juce::Colour lo, juce::Colour hi);
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -51,7 +51,7 @@ public:
 private:
     juce::Slider slider;
     juce::String title;
-    juce::Colour colour;
+    juce::Colour rampLo, rampHi;   // fader light ramp: bottom -> top
     juce::AudioProcessorValueTreeState::SliderAttachment attachment;
 };
 

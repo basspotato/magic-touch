@@ -280,8 +280,12 @@ public:
         const float pHi = (float) s.getPositionOfValue (s.getMaximum());
         const float top = juce::jmin (pLo, pHi) - 6.0f;
         const float bottom = juce::jmax (pLo, pHi) + 6.0f;
+        // light ramp: trackColourId = start (bottom of the fader), thumbColourId = end (top)
         const auto col = s.findColour (juce::Slider::thumbColourId);
+        const auto colLo = s.findColour (juce::Slider::trackColourId);
         const bool hot = s.isMouseOverOrDragging();
+        const float prop = (float) s.valueToProportionOfLength (s.getValue());
+        const auto capCol = ramp (colLo, col, prop);   // colour of the light at the cap
 
         // scale ticks (major every 5)
         for (int i = 0; i <= 20; ++i)
@@ -304,23 +308,20 @@ public:
         g.setColour (MT::col::line.withAlpha (0.30f));
         g.drawRoundedRectangle (slot.expanded (0.5f), 4.0f, 1.0f);
 
-        // backlit fill: fades up from a dim ember at the bottom to full colour at the cap,
-        // and the whole fill burns hotter as the value rises
-        const float prop = (float) s.valueToProportionOfLength (s.getValue());
+        // backlit fill: the ramp runs along the whole track (start colour at the bottom, end colour at the top),
+        // so the fill shows more of it as the value rises, and the whole fill burns hotter with the value
         const float fillH = bottom - 3.0f - sliderPos;
         if (fillH > 0.5f)
         {
             const auto fill = juce::Rectangle<float> (cx - 1.75f, sliderPos, 3.5f, fillH);
-            const auto hotCol  = col.withMultipliedSaturation (0.85f + 0.3f * prop).brighter (0.1f + 0.55f * prop);
-            const auto coldCol = col.darker (0.85f).withAlpha (0.30f);
 
-            juce::ColourGradient glow (hotCol.withAlpha ((hot ? 0.10f : 0.05f) + 0.22f * prop), 0.0f, sliderPos,
-                                       col.withAlpha (0.0f), 0.0f, bottom, false);
+            juce::ColourGradient glow (capCol.brighter (0.2f * prop).withAlpha ((hot ? 0.10f : 0.05f) + 0.22f * prop), 0.0f, sliderPos,
+                                       colLo.withAlpha (0.0f), 0.0f, bottom, false);
             g.setGradientFill (glow);
             g.fillRoundedRectangle (fill.expanded (5.0f, 2.0f), 5.0f);
 
-            juce::ColourGradient body (hotCol, 0.0f, sliderPos, coldCol, 0.0f, bottom, false);
-            body.addColour (0.35, col.withAlpha (0.55f + 0.35f * prop));
+            juce::ColourGradient body (col.brighter (0.05f + 0.35f * prop).withAlpha (0.75f + 0.25f * prop), 0.0f, top,
+                                       colLo.withAlpha (0.55f + 0.3f * prop), 0.0f, bottom, false);
             g.setGradientFill (body);
             g.fillRoundedRectangle (fill.expanded (1.0f, 0.0f), 2.25f);
 
@@ -336,7 +337,7 @@ public:
         g.fillRoundedRectangle (thumb.translated (0.0f, 2.0f).expanded (1.0f), 4.0f);
         if (hot)
         {
-            g.setColour (col.withAlpha (0.22f));
+            g.setColour (capCol.withAlpha (0.22f));
             g.fillRoundedRectangle (thumb.expanded (4.0f), 7.0f);
         }
         juce::ColourGradient body (juce::Colour (0xff57514b), 0.0f, thumb.getY(),
@@ -355,9 +356,9 @@ public:
         }
         g.setColour (MT::col::tick.withAlpha (hot ? 0.6f : 0.32f));
         g.drawRoundedRectangle (thumb.reduced (0.5f), 3.5f, 1.0f);
-        g.setColour (col.withAlpha (0.45f));
+        g.setColour (capCol.withAlpha (0.45f));
         g.fillRect (thumb.getX() + 3.0f, thumb.getCentreY() - 1.5f, thumb.getWidth() - 6.0f, 3.0f);
-        g.setColour (col.brighter (0.6f));
+        g.setColour (capCol.brighter (0.6f));
         g.fillRect (thumb.getX() + 4.0f, thumb.getCentreY() - 0.5f, thumb.getWidth() - 8.0f, 1.0f);
     }
 };
