@@ -113,9 +113,13 @@ void MagicTouchProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
             f->reset();
         }
         tubeDc[ch].coefficients     = Coeffs::makeFirstOrderHighPass (osr, 5.0f);
+        tubeXf[ch].coefficients     = Coeffs::makeFirstOrderHighPass (osr, 20.0f);              // input transformer
+        tubeParHp[ch].coefficients  = Coeffs::makeHighPass (osr, 40.0f, 0.7071f);               // parallel path: full band, minus subsonics
+        tubeParDc[ch].coefficients  = Coeffs::makeFirstOrderHighPass (osr, 8.0f);
+        tubeAir[ch].coefficients    = Coeffs::makeHighShelf (osr, 10000.0f, 0.6f, juce::Decibels::decibelsToGain (2.0f));   // "Air"
         exciteHp[ch].coefficients   = Coeffs::makeHighPass (osr, 4500.0f, 0.7071f);
         excitePost[ch].coefficients = Coeffs::makeHighPass (osr, 2000.0f, 0.7071f);
-        for (auto* f : { &tubeDc[ch], &exciteHp[ch], &excitePost[ch] })
+        for (auto* f : { &tubeDc[ch], &tubeXf[ch], &tubeParHp[ch], &tubeParDc[ch], &tubeAir[ch], &exciteHp[ch], &excitePost[ch] })
             f->reset();
     }
     for (auto* f : { &midLp1, &midLp2, &midHp1, &midHp2, &sideHp1, &sideHp2 })
@@ -289,18 +293,34 @@ void MagicTouchProcessor::updateDynamicFilters (bool force)
 // Saturation stages (run at 4x, so their harmonics don't fold back as aliasing)
 float MagicTouchProcessor::tubeStage (float x, size_t ch, float a)
 {
-    // Triode-style asymmetric transfer: the positive half compresses harder than the negative,
-    // giving mostly 2nd-order harmonics. The bias grows with level (like grid conduction), so
-    // the even-harmonic content rises as the music gets louder.
+    // Black Box HG-2 style dual path (voiced from its published design, not measured from a unit):
+    //  - input transformer, then the MAIN path: a firm pentode stage into an asymmetric triode stage
+    //  - a PARALLEL path of two 12AX7-style stages (full bandwidth) whose harmonics are blended back in
+    //  - a subtle Air lift. The Tube knob sets the drive of both paths and the harmonic blend.
+    auto asymA = [] (float u) { return u >= 0.0f ? satCurve (u) : satCurve (0.6f * u) / 0.6f; };
+    auto asymB = [] (float u) { return u <= 0.0f ? satCurve (u) : satCurve (0.7f * u) / 0.7f; };
+
+    const float xi = tubeXf[ch].processSample (x);
+
     auto& env = tubeEnv[ch];
-    env += (std::min (1.0f, std::abs (x)) - env) * tubeEnvA;
+    env += (std::min (1.0f, std::abs (xi)) - env) * tubeEnvA;
 
-    const float d = 1.0f + a * 1.8f;
+    // main path: pentode (firmer, mostly symmetric) -> triode (asymmetric, bias rises with level)
+    const float dP = 1.0f + a * 1.2f;
+    const float pent = satCurve (xi * dP) / dP;
+    const float dT = 1.0f + a * 1.8f;
     const float bias = a * (0.08f + 0.30f * env);
-    auto f = [] (float u) { return u >= 0.0f ? satCurve (u) : satCurve (0.6f * u) / 0.6f; };
+    const float trio = (asymA (pent * dT + bias) - asymA (bias)) / dT;
 
-    const float y = (f (x * d + bias) - f (bias)) / d;
-    const float w = tubeDc[ch].processSample (y);
+    // parallel path: two 12AX7-style stages in series (full band), blended back in like the unit's Harmonics knob
+    const float dX = 1.0f + a * 1.5f;
+    const float par = tubeParHp[ch].processSample (xi);
+    const float s1 = asymA (par * dX) / dX;
+    const float s2 = tubeParDc[ch].processSample (asymB (s1 * 1.5f) / 1.5f);
+    const float m = 0.35f * a;
+
+    float w = tubeDc[ch].processSample (trio) * (1.0f - m) + s2 * m;
+    w += (tubeAir[ch].processSample (w) - w) * 0.5f * a;   // about +1 dB of air at full Tube
     return x + (w - x) * a;
 }
 

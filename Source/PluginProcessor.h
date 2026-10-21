@@ -113,7 +113,7 @@ private:
 
     // ---- filters (all at the oversampled rate)
     std::array<Filter, 2> eqLow, eqBody, eqPres, eqAir;
-    std::array<Filter, 2> tubeDc;
+    std::array<Filter, 2> tubeDc, tubeXf, tubeParHp, tubeParDc, tubeAir;   // tubeXf/ParHp/ParDc/Air: HG-2 style voicing, fixed coefficients
     std::array<Filter, 2> tapeBump, tapePre, tapeDe, tapeLp;
     std::array<Filter, 2> exciteHp, excitePost;
     std::array<Filter, 2> scHp;
