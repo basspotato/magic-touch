@@ -5,9 +5,9 @@
 //   Classic        - filled 1/6-octave spectrum + peak hold + input overlay, hover readout
 //   3D Waterfall   - perspective landscape of recent spectra in a fire palette
 //   Spectral Cloud - smoky persistence trails with a thin average line, in the theme colour, like Classic
-//   Waveform       - the song scrolling past as six nested, auto-levelled band layers in the console
-//                    heat ramp (sub ember -> bass red -> low-mid orange -> mid amber -> presence yellow ->
-//                    air cream), each with a bright crest, so kicks can't swamp the rest of the mix
+//   Waveform       - the song scrolling past as six nested, auto-levelled band layers fading up the
+//                    spectrum (sub deep blue -> bass deep purple -> low-mid light purple -> mid pink ->
+//                    presence orange -> air yellow), each with a bright crest, so kicks can't swamp the rest
 //   Spectrogram    - scrolling time/frequency heat map (inferno palette)
 //   1/3-Octave RTA - 31 ISO bands as segmented LED columns with peak caps
 //

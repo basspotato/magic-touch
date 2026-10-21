@@ -722,16 +722,16 @@ void SpectrumAnalyzer::drawCloud (juce::Graphics& g)
 
 namespace
 {
-// Waveform palette: the console's heat ramp, one step per band, from deep ember in the sub up through
-// red, orange, amber and yellow to a pale cream in the air. Neighbouring bands stay clearly apart.
+// Waveform palette: a vivid spectrum fade from the lowest band up to the highest, deep blue in the sub,
+// deep purple, lighter purple, pink, orange, and yellow in the air. Neighbouring bands stay clearly apart.
 // Bands follow the common engineering split: sub / bass / low-mid / mid / presence / air.
 const juce::Colour kWaveBands[6] = {
-    juce::Colour (0xffa81c0c),   //    20 -    60 Hz  sub       deep ember
-    juce::Colour (0xffff3d1a),   //    60 -   250 Hz  bass      signal red
-    juce::Colour (0xffff7212),   //   250 -   500 Hz  low-mid   orange
-    juce::Colour (0xffffa63e),   //   500 -  2000 Hz  mid       amber
-    juce::Colour (0xffffd23f),   //  2000 -  6000 Hz  presence  yellow
-    juce::Colour (0xfffff1d8)    //  6000 - 20000 Hz  air       cream
+    juce::Colour (0xff1d3dff),   //    20 -    60 Hz  sub       deep vibrant blue
+    juce::Colour (0xff6a1bff),   //    60 -   250 Hz  bass      deep vibrant purple
+    juce::Colour (0xffa65cff),   //   250 -   500 Hz  low-mid   lighter vibrant purple
+    juce::Colour (0xffff4fb8),   //   500 -  2000 Hz  mid       pink
+    juce::Colour (0xffff8a1e),   //  2000 -  6000 Hz  presence  orange
+    juce::Colour (0xffffe03d)    //  6000 - 20000 Hz  air       yellow
 };
 // every band is auto-levelled against its own slow average, so the kick can't swamp the mids and highs
 constexpr float kWaveTarget = 0.45f;     // where a band's long-term level sits (before the soft limiter)
