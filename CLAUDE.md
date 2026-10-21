@@ -22,6 +22,7 @@ EQ (4 bands) → Tube → Tape → Exciter → Transient Punch → Glue Compress
 
 - Entire colour/dynamics chain runs **4x oversampled** (polyphase IIR half-band filters). Don't bypass oversampling without flagging the quality trade-off.
 - Limiter catches inter-sample (true) peaks at the oversampled rate.
+- Tape stage is voiced after the Ampex ATR-102 at 30 ips (subtle, mastering-grade): constants kTape* in PluginProcessor.h. It is a voicing from the machine's general character, not measured from a unit.
 - EQ and tape coefficients are smoothed in place on the audio thread — no zipper noise, no allocation.
 - Dry/wet is sample-aligned with the processed signal.
 

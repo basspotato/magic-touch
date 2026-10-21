@@ -265,12 +265,15 @@ void MagicTouchProcessor::updateDynamicFilters (bool force)
     const float ta = smTape.getCurrentValue();
     if (force || std::abs (ta - appliedTape) > 1.0e-4f)
     {
-        // head bump, HF pre-emphasis into the saturator and exact de-emphasis after it,
-        // and a gap-loss low-pass that closes as the tape is driven harder
-        const auto bump = ACoeffs::makePeakFilter (osr, 55.0f, 1.0f, juce::Decibels::decibelsToGain (2.0f * ta));
-        const auto pre  = ACoeffs::makeHighShelf  (osr, 2500.0f, 0.6f, juce::Decibels::decibelsToGain ( 5.0f * ta));
-        const auto de   = ACoeffs::makeHighShelf  (osr, 2500.0f, 0.6f, juce::Decibels::decibelsToGain (-5.0f * ta));
-        const auto lp   = ACoeffs::makeLowPass    (osr, 22000.0f - 8000.0f * ta, 0.6f);
+        // Ampex ATR-102 style voicing (30 ips mastering deck, subtle): a broad playback-head bump
+        // around 100 Hz (applied after the saturator so the low end stays tight), HF pre-emphasis into
+        // the saturator with exact de-emphasis after it (highs saturate and squash first, which is the
+        // smooth top), and a gentle gap-loss low-pass that stays high and closes slowly with drive.
+        // Voicing is from the machine's general character, not measured from a unit.
+        const auto bump = ACoeffs::makePeakFilter (osr, kTapeBumpF, kTapeBumpQ, juce::Decibels::decibelsToGain (kTapeBumpDb * ta));
+        const auto pre  = ACoeffs::makeHighShelf  (osr, kTapeEmphF, 0.6f, juce::Decibels::decibelsToGain ( kTapeEmphDb * ta));
+        const auto de   = ACoeffs::makeHighShelf  (osr, kTapeEmphF, 0.6f, juce::Decibels::decibelsToGain (-kTapeEmphDb * ta));
+        const auto lp   = ACoeffs::makeLowPass    (osr, 22000.0f - 5000.0f * ta, 0.6f);
         for (size_t ch = 0; ch < 2; ++ch)
         {
             *tapeBump[ch].coefficients = bump;
@@ -303,13 +306,14 @@ float MagicTouchProcessor::tubeStage (float x, size_t ch, float a)
 
 float MagicTouchProcessor::tapeStage (float x, size_t ch, float a)
 {
-    // head bump -> HF pre-emphasis -> soft magnetic saturation -> de-emphasis -> gap loss.
-    // The emphasis pair makes high frequencies saturate first, like real tape.
-    float y = tapeBump[ch].processSample (x);
-    y = tapePre[ch].processSample (y);
-    const float d = 1.0f + a * 2.2f;
+    // HF pre-emphasis -> soft odd-harmonic saturation -> de-emphasis -> head bump -> gap loss.
+    // The emphasis pair makes high frequencies saturate first, like real tape; the bump comes after
+    // the saturator (as on a playback head) so the low end isn't driven into distortion.
+    float y = tapePre[ch].processSample (x);
+    const float d = 1.0f + a * 1.4f;
     y = satCurve (y * d) / d;
     y = tapeDe[ch].processSample (y);
+    y = tapeBump[ch].processSample (y);
     y = tapeLp[ch].processSample (y);
     return x + (y - x) * a;
 }
