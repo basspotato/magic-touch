@@ -74,6 +74,7 @@ public:
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
 
 private:
+    struct Particle { float x, y, speed, size, phase; };
     struct MeterCh  { float peak = -90.0f, rms = -90.0f, hold = -90.0f, holdT = 0.0f; bool clip = false; };
 
     void timerCallback() override;
@@ -87,7 +88,7 @@ private:
     void updateEqCurve();
     void stepPreset (int dir);
     void showPresetMenu();
-    juce::Colour liveAccent() const;  // fixed Kicker orange
+    juce::Colour liveAccent() const;  // Kicker orange reacting to the music
     // Tone EQ display: hover readout, click/drag, wheel and double-click on the four fixed-frequency bands
     juce::Rectangle<float> eqPlotRect() const;
     int   eqBandAt (juce::Point<float> p, bool nodesOnly) const;
@@ -112,6 +113,7 @@ private:
     juce::Image chassis;      // brushed metal, bezel, screws
     juce::Image background;   // chassis + panels + labels + grids: everything that doesn't move
     juce::RectangleList<int> gapRegion;   // where the music-reactive glow shows (between panels)
+    int frameCount = 0;
     juce::Image displayGlass; // glare/inner-shadow overlay for the EQ display
     bool bgDirty = true;
     int bgPreset = -2;
@@ -151,6 +153,11 @@ private:
     float grComp = 0.0f, grLim = 0.0f, scLevel = -90.0f, rmsOut = -90.0f;
     float outMax = -90.0f, lufsMDisp = -90.0f, lufsSDisp = -90.0f;
     double lastTickMs = 0.0;
+
+    // reactive visuals
+    float level = 0.0f, bass = 0.0f;
+    std::array<Particle, 48> particles {};
+    juce::Random rng;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MagicTouchEditor)
 };
