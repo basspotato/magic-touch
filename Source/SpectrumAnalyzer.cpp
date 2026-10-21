@@ -21,8 +21,6 @@ juce::Colour lutFrom (std::initializer_list<std::pair<float, juce::uint32>> stop
     return juce::Colour (prev.second);
 }
 
-const juce::Colour kCloudCol  { 0xffc6fff2 };
-const juce::Colour kCloudBg   { 0xff1a1c1f };
 } // namespace
 
 const char* SpectrumAnalyzer::modeName (int m)
@@ -248,11 +246,11 @@ void SpectrumAnalyzer::update (float dt)
             juce::Graphics g (cloudImg);
             g.addTransform (juce::AffineTransform::translation (-plot.getX(), -plot.getY()));
             const auto line = makePath (outAvg, false);
-            g.setColour (kCloudCol.withAlpha (0.05f));
+            g.setColour (accent.withAlpha (0.05f));
             g.strokePath (line, juce::PathStrokeType (9.0f));
-            g.setColour (kCloudCol.withAlpha (0.10f));
+            g.setColour (accent.withAlpha (0.10f));
             g.strokePath (line, juce::PathStrokeType (3.5f));
-            g.setColour (kCloudCol.withAlpha (0.22f));
+            g.setColour (accent.withAlpha (0.22f));
             g.strokePath (line, juce::PathStrokeType (1.2f));
             break;
         }
@@ -391,8 +389,7 @@ void SpectrumAnalyzer::buildStatic()
 
     // panel background, per mode
     juce::Colour top = base.brighter (0.06f), bot = juce::Colour (0xff050403);
-    if (mode == Cloud)        { top = kCloudBg.brighter (0.05f); bot = kCloudBg.darker (0.4f); }
-    else if (mode == Waveform) { top = juce::Colour (0xff0e0b09); bot = juce::Colour (0xff040302); }
+    if (mode == Waveform) { top = juce::Colour (0xff0e0b09); bot = juce::Colour (0xff040302); }
     else if (mode == Waterfall) { top = juce::Colour (0xff100c0b); bot = juce::Colour (0xff040303); }
     g.setGradientFill (juce::ColourGradient (top, 0.0f, b.getY(), bot, 0.0f, b.getBottom(), false));
     g.fillRoundedRectangle (b, 10.0f);
@@ -721,7 +718,7 @@ void SpectrumAnalyzer::drawCloud (juce::Graphics& g)
         g.drawImageAt (cloudImg, (int) plot.getX(), (int) plot.getY());
 
     // thin bright average line on top of the smoke
-    g.setColour (kCloudCol.withAlpha (0.9f));
+    g.setColour (accent.brighter (0.35f));
     g.strokePath (makePath (slowAvg, false), juce::PathStrokeType (1.0f));
     drawHover (g, outAvg);
 }
@@ -990,7 +987,7 @@ void SpectrumAnalyzer::drawHover (juce::Graphics& g, const std::array<float, num
     const float f = freqForX (hoverX);
     const float db = valueAtX (a, hoverX);
     const float y = yForDb (db);
-    const auto hc = mode == Cloud ? kCloudCol : accent;
+    const auto hc = accent;
 
     g.setColour (MT::col::tick.withAlpha (0.28f));
     g.fillRect (std::round (hoverX), plot.getY(), 1.0f, plot.getHeight());

@@ -4,7 +4,7 @@
 // Compact analyser with six display modes (chosen from the header dropdown):
 //   Classic        - filled 1/6-octave spectrum + peak hold + input overlay, hover readout
 //   3D Waterfall   - perspective landscape of recent spectra in a fire palette
-//   Spectral Cloud - smoky persistence trails with a thin average line, mint on graphite
+//   Spectral Cloud - smoky persistence trails with a thin average line, in the theme colour, like Classic
 //   Waveform       - the song scrolling past; each slice is one smooth gradient whose colours follow
 //                    the band balance (sub indigo -> bass azure -> low-mid orchid -> mid coral ->
 //                    presence amber -> air cream), warm glowing edges, kicks deepen to plum, reflection
