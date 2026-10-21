@@ -53,6 +53,7 @@ Resources/Fonts/        — Barlow Condensed, Share Tech Mono (binary data via j
 - Fixed Potato-Kicker palette (no theme picker): light ramp orange -> yellow. The particles, accent colour and logo star still react to the music, in the same orange; there is no background glow or panel rim lighting.
 - Knobs: Kicker lit knob (black glossy cap, backlit ring + ticks that light along the ramp as the value rises; bipolar knobs light from zero). Ramp colours come from the slider's rotarySliderFillColourId (start) / rotarySliderOutlineColourId (end). Knob cells are buffered to images, so the ring only re-renders when a knob moves or the ramp changes.
 - Faders: backlit ramp along the track, intensifying with value (compressor orange -> yellow, limiter orange -> red, output yellow -> white). Group headers (GLUE COMPRESSOR / LIMITER / OUT) are glow labels with fading rules, and lit divider lines with LEDs separate the groups. All of it is drawn in the cached background, so no extra repaint cost.
+- Top bar: a small Potato-Kicker potato badge sits between the POTATO MAGIC title and the preset selector (drawn in the cached background; only the pupils redraw per frame, glowing with the output level).
 - Analyzer: dropdown with 6 display modes including scrolling Waveform.
 - RMS meter to the left of the sidechain meter.
 - Level meters fade orange (low) -> yellow -> red (top), per segment, by dB.

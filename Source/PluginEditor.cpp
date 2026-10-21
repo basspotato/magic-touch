@@ -99,6 +99,91 @@ void drawPanel (juce::Graphics& g, juce::Rectangle<float> r, const juce::String&
         drawPanelTitle (g, r, title, lo, hi);
 }
 
+// Potato emblem (ported from Potato-Kicker): orange/yellow line art with a calm face, drawn small for the
+// top bar. The whole figure is drawn once into the cached background; only the pupils are redrawn per frame
+// (pupilsOnly), glowing with the output level.
+juce::Path potatoPath (juce::Point<float> c, float R)
+{
+    const float radii[16] { 1.02f, 0.97f, 0.90f, 0.93f, 0.99f, 0.95f, 0.91f, 0.98f, 1.06f, 1.03f, 0.94f, 0.90f, 0.96f, 1.04f, 1.00f, 1.05f };
+    const float tilt = juce::degreesToRadians (-10.0f), ct = std::cos (tilt), st = std::sin (tilt);
+    juce::Point<float> pts[16];
+    for (int i = 0; i < 16; ++i)
+    {
+        const float a = juce::degreesToRadians ((float) i * 22.5f);
+        const float x = std::cos (a) * R * 1.22f * radii[i], y = std::sin (a) * R * 1.0f * radii[i];
+        pts[i] = c + juce::Point<float> (x * ct - y * st, x * st + y * ct);
+    }
+    juce::Path p;
+    auto mid = [&] (int i, int j) { return (pts[i] + pts[j]) * 0.5f; };
+    p.startNewSubPath (mid (15, 0));
+    for (int i = 0; i < 16; ++i)
+        p.quadraticTo (pts[i], mid (i, (i + 1) % 16));
+    p.closeSubPath();
+    return p;
+}
+
+void drawPotatoBadge (juce::Graphics& g, juce::Point<float> c, float R, float act, bool pupilsOnly)
+{
+    auto eyeCentre = [&] (int i) { return c + juce::Point<float> (i == 0 ? -0.34f : 0.30f, i == 0 ? -0.16f : -0.19f) * R; };
+    auto pupils = [&] (float a)
+    {
+        for (int i = 0; i < 2; ++i)
+        {
+            const float pr = R * (0.085f + 0.025f * a);
+            const auto pc = eyeCentre (i) + juce::Point<float> (R * 0.025f, R * 0.03f);
+            g.setColour (col::amber.withAlpha (0.25f + 0.4f * a));
+            g.fillEllipse (juce::Rectangle<float> (pr * 4.0f, pr * 4.0f).withCentre (pc));
+            g.setGradientFill (juce::ColourGradient (juce::Colour (0xfffff3c8), pc.x - pr * 0.3f, pc.y - pr * 0.3f,
+                                                     col::yellow, pc.x + pr, pc.y + pr, true));
+            g.fillEllipse (juce::Rectangle<float> (pr * 2.0f, pr * 2.0f).withCentre (pc));
+        }
+    };
+
+    if (pupilsOnly) { pupils (act); return; }
+
+    const juce::Path spud = potatoPath (c, R);
+
+    // backlight, body and glowing outline
+    g.setGradientFill (juce::ColourGradient (col::amber.withAlpha (0.16f), c.x, c.y, col::amber.withAlpha (0.0f), c.x + R * 1.7f, c.y, true));
+    g.fillEllipse (juce::Rectangle<float> (R * 3.4f, R * 2.7f).withCentre (c));
+    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff3a200c), c.x - R * 0.35f, c.y - R * 0.45f,
+                                             juce::Colour (0xff0d0704), c.x + R * 0.95f, c.y + R * 0.8f, true));
+    g.fillPath (spud);
+    const auto sb = spud.getBounds();
+    auto rampFill = [&] (float a) { return juce::ColourGradient (col::orange.withAlpha (a), sb.getX(), sb.getBottom(),
+                                                                  col::yellow.withAlpha (a), sb.getRight(), sb.getY(), false); };
+    const juce::PathStrokeType::JointStyle js = juce::PathStrokeType::curved;
+    const auto ec = juce::PathStrokeType::rounded;
+    g.setGradientFill (rampFill (0.16f)); g.strokePath (spud, juce::PathStrokeType (5.0f, js, ec));
+    g.setGradientFill (rampFill (0.40f)); g.strokePath (spud, juce::PathStrokeType (2.6f, js, ec));
+    g.setGradientFill (rampFill (1.0f));  g.strokePath (spud, juce::PathStrokeType (1.3f, js, ec));
+
+    // skin highlight and the little sprout spots
+    juce::Path hl;
+    hl.addCentredArc (c.x - R * 0.1f, c.y + R * 0.02f, R * 1.0f, R * 0.66f, juce::degreesToRadians (-14.0f),
+                      juce::degreesToRadians (-78.0f), juce::degreesToRadians (-22.0f), true);
+    g.setColour (col::amberHi.withAlpha (0.35f));
+    g.strokePath (hl, juce::PathStrokeType (1.0f, js, ec));
+    g.setColour (col::amber.withAlpha (0.5f));
+    for (auto p : { juce::Point<float> (-0.86f, 0.34f), juce::Point<float> (0.88f, -0.40f), juce::Point<float> (0.66f, 0.52f),
+                    juce::Point<float> (-0.48f, 0.62f), juce::Point<float> (-0.10f, -0.70f) })
+        g.drawEllipse (juce::Rectangle<float> (2.6f, 1.8f).withCentre (c + p * R), 0.8f);
+
+    // face: round eyes with glowing pupils, small smile
+    for (int i = 0; i < 2; ++i)
+    {
+        const auto socket = juce::Rectangle<float> (R * 0.30f, R * 0.36f).withCentre (eyeCentre (i));
+        g.setColour (juce::Colour (0xff080402)); g.fillEllipse (socket);
+        g.setColour (col::amber.withAlpha (0.85f)); g.drawEllipse (socket, 1.0f);
+    }
+    pupils (0.0f);
+    juce::Path mouth;
+    mouth.startNewSubPath (c.x - R * 0.22f, c.y + R * 0.30f);
+    mouth.quadraticTo (c.x - R * 0.02f, c.y + R * 0.46f, c.x + R * 0.22f, c.y + R * 0.27f);
+    g.setColour (col::amber.withAlpha (0.3f)); g.strokePath (mouth, juce::PathStrokeType (3.0f, js, ec));
+    g.setColour (col::yellow);                 g.strokePath (mouth, juce::PathStrokeType (1.4f, js, ec));
+}
+
 // level meter colour: a smooth fade, orange at the bottom -> yellow -> red at the top
 juce::Colour meterFade (float db)
 {
@@ -323,6 +408,14 @@ void MagicTouchEditor::resized()
     outKnob.setBounds (topBar.getRight() - 66, topBar.getY() - 6, 60, 60);
     scButton.setBounds (dynPanel.getRight() - 150, dynPanel.getY() + 6, 138, 20);
     starRect     = { 12, 16, 46, 46 };
+
+    // potato badge: centred in the gap between the title block and the preset selector
+    {
+        const float titleW = juce::GlyphArrangement::getStringWidth (uiFont (22.0f, true).withExtraKerningFactor (0.3f), "POTATO MAGIC");
+        const float subW   = juce::GlyphArrangement::getStringWidth (monoFont (10.5f), "MIX & MASTER BUS PROCESSOR");
+        const float textEnd = 60.0f + std::max (titleW, subW);
+        badgeRect = juce::Rectangle<int> (60, 44).withCentre ({ (int) ((textEnd + (float) presetRect.getX()) * 0.5f), topBar.getCentreY() });
+    }
     outValueRect = outTextRect.withTrimmedTop (18);
     scHintRect   = { scButton.getX() - 130, scButton.getY(), 122, scButton.getHeight() };
     bgDirty = true;
@@ -450,6 +543,7 @@ void MagicTouchEditor::timerCallback()
             repaint (gr);
     }
     repaint (starRect);
+    repaint (badgeRect);
     repaint (displayRect.toNearestInt());
     repaint (meterRect.toNearestInt());
     if (std::abs (outKnob.getValue() - lastOutValue) > 1.0e-6)
@@ -640,6 +734,9 @@ void MagicTouchEditor::drawTopBar (juce::Graphics& g, juce::Colour accent, bool 
         g.setColour (accent.brighter (0.5f));
         g.fillPath (star);
 
+        // potato badge: the pupils glow with the output level (the rest is in the cached background)
+        drawPotatoBadge (g, badgeRect.toFloat().getCentre() + juce::Point<float> (0.0f, -1.0f), 15.0f, level, true);
+
         // output volume value (the knob itself is a child component)
         g.setColour (kCream);
         g.setFont (monoFont (15.0f));
@@ -653,6 +750,8 @@ void MagicTouchEditor::drawTopBar (juce::Graphics& g, juce::Colour accent, bool 
     g.setColour (juce::Colour (0xffb98c62));
     g.setFont (monoFont (10.5f));
     g.drawText ("MIX & MASTER BUS PROCESSOR", 60, 46, 300, 14, juce::Justification::left, false);
+
+    drawPotatoBadge (g, badgeRect.toFloat().getCentre() + juce::Point<float> (0.0f, -1.0f), 15.0f, 0.0f, false);
 
     // preset selector
     insetWindow (g, presetRect.toFloat().reduced (1.0f));

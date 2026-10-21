@@ -137,7 +137,7 @@ private:
     float eqLastY = 0.0f;
 
     // layout
-    juce::Rectangle<int>   topBar, presetRect, prevRect, nextRect, nameRect, tonePanel, dynPanel, outTextRect,
+    juce::Rectangle<int>   badgeRect, topBar, presetRect, prevRect, nextRect, nameRect, tonePanel, dynPanel, outTextRect,
                            starRect, outValueRect, scHintRect;
     juce::Rectangle<float> displayRect, meterRect, meterResetRect;
 
