@@ -30,10 +30,11 @@ EQ (4 bands) → Tube → Tape → Exciter → Transient Punch → Glue Compress
 ```
 Source/
   Params.h              — all APVTS parameter IDs and ranges
-  LookAndFeel.h         — custom JUCE LookAndFeel
+  LookAndFeel.h         — palette, fonts, ramp helpers, lit knob + console fader (custom JUCE LookAndFeel)
   SpectrumAnalyzer.*    — FFT-based spectrum display
   PluginProcessor.*     — audio thread, parameter handling
   PluginEditor.*        — GUI
+Resources/Fonts/        — Barlow Condensed, Share Tech Mono (binary data via juce_add_binary_data, shared with Potato-Kicker)
 ```
 
 ## Architecture notes
@@ -45,9 +46,11 @@ Source/
 
 ## GUI conventions
 
-- FabFilter-inspired layout.
+- The GUI is branded POTATO MAGIC (the plugin/product name is still Magic Touch).
+- Potato-Kicker "light-up console" style: near-black tiles with ramp borders, top light strip and corner brackets; glow text; Barlow Condensed labels, Share Tech Mono values.
+- Light ramp = orange -> yellow in the default "Console" theme (appended to the theme list so saved sessions keep their index); the other themes use a deeper -> lighter shade of their colour; "Reactive" follows the level hue.
 - Every colour theme is music-reactive. Themes are saved per instance and as the default for new instances.
-- Knobs: illuminated-ring style (like Acustica / Hardwell SpaceControl).
+- Knobs: Kicker lit knob (black glossy cap, backlit ring + ticks that light along the ramp as the value rises; bipolar knobs light from zero). Ramp colours come from the slider's rotarySliderFillColourId (start) / rotarySliderOutlineColourId (end). Knob cells are buffered to images, so the ring only re-renders when a knob moves or the ramp changes.
 - Faders: compressor = yellow, limiter = red, output = white; gradient fill intensifies with value.
 - Analyzer: dropdown with 6 display modes including scrolling Waveform.
 - RMS meter to the left of the sidechain meter.

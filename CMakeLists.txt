@@ -29,6 +29,11 @@ juce_add_plugin(MagicTouch
     PRODUCT_NAME "Magic Touch"
     COPY_PLUGIN_AFTER_BUILD ${MT_COPY})
 
+juce_add_binary_data(MagicTouchFonts SOURCES
+    Resources/Fonts/BarlowCondensed-SemiBold.ttf
+    Resources/Fonts/BarlowCondensed-Bold.ttf
+    Resources/Fonts/ShareTechMono-Regular.ttf)
+
 target_sources(MagicTouch PRIVATE
     Source/Params.h
     Source/LookAndFeel.h
@@ -47,6 +52,7 @@ target_compile_definitions(MagicTouch PUBLIC
 
 target_link_libraries(MagicTouch
     PRIVATE
+        MagicTouchFonts
         juce::juce_audio_utils
         juce::juce_dsp
     PUBLIC

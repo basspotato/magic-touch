@@ -24,6 +24,10 @@ public:
     void update (float dtSeconds);          // called from the editor's timer
     void setAccent (juce::Colour c)         { accent = c; }
     void setBaseColour (juce::Colour c);
+    void setRamp (juce::Colour lo, juce::Colour hi)   // theme light ramp for the frame
+    {
+        if (lo != rampLo || hi != rampHi) { rampLo = lo; rampHi = hi; staticDirty = true; repaint(); }
+    }
 
     void paint (juce::Graphics&) override;
     void paintOverChildren (juce::Graphics&) override;
@@ -106,7 +110,8 @@ private:
     bool staticDirty = true;
 
     juce::Rectangle<float> plot, legendIn, modeRect;
-    juce::Colour accent { 0xff3ba7ff }, base { 0xff12151f };
+    juce::Colour accent { 0xff3ba7ff }, base { 0xff0e0b09 };
+    juce::Colour rampLo { 0xffff7212 }, rampHi { 0xffffd23f };
     bool showInput = true;
     float hoverX = -1.0f;
 

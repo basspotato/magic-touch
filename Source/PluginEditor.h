@@ -15,7 +15,7 @@ public:
     void paintButton (juce::Graphics&, bool over, bool down) override;
 
 private:
-    juce::Colour led { 0xff3a3f52 }, accent { 0xff2ee6a6 };
+    juce::Colour led { 0xff3a2210 }, accent { 0xffffd23f };
 };
 
 //==============================================================================
@@ -23,7 +23,10 @@ class KnobCell : public juce::Component
 {
 public:
     KnobCell (juce::AudioProcessorValueTreeState& apvts, const juce::String& paramId,
-              const juce::String& title, juce::Colour colour);
+              const juce::String& title);
+
+    // the light ramp of the knob ring: colour at the start of travel -> colour at the end
+    void setRamp (juce::Colour lo, juce::Colour hi);
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -31,7 +34,7 @@ public:
 private:
     juce::Slider slider;
     juce::String title;
-    juce::Colour colour;
+    juce::Colour rampLo, rampHi;
     juce::AudioProcessorValueTreeState::SliderAttachment attachment;
 };
 
@@ -81,6 +84,7 @@ private:
     void showPresetMenu();
     void showThemeMenu();
     void setTheme (int index, bool saveAsDefault);
+    void applyRamp (bool force);      // pushes the theme's light ramp to the knobs and panels
     juce::Colour themeBase() const;   // the theme colour (current hue for "Reactive")
     juce::Colour tinted (juce::Colour c, float amount) const;
     juce::Colour liveAccent() const;  // theme colour reacting to the music (every theme)
@@ -117,7 +121,8 @@ private:
     std::array<float, 4> eqCached { 99.0f, 99.0f, 99.0f, 99.0f };
 
     // themes
-    int themeIndex = 0;
+    int themeIndex = MT::kConsoleTheme;
+    juce::Colour rampLo, rampHi;   // light ramp of the current theme (Console: orange -> yellow)
     std::unique_ptr<juce::PropertiesFile> settings;
 
     // layout

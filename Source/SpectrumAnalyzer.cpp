@@ -390,19 +390,32 @@ void SpectrumAnalyzer::buildStatic()
     const auto b = getLocalBounds().toFloat();
 
     // panel background, per mode
-    juce::Colour top = base.brighter (0.06f), bot = juce::Colour (0xff05060a);
+    juce::Colour top = base.brighter (0.06f), bot = juce::Colour (0xff050403);
     if (mode == Cloud)        { top = kCloudBg.brighter (0.05f); bot = kCloudBg.darker (0.4f); }
-    else if (mode == Waveform) { top = juce::Colour (0xff0b0d14); bot = juce::Colour (0xff030407); }
-    else if (mode == Waterfall) { top = juce::Colour (0xff0d0b14); bot = juce::Colour (0xff030306); }
+    else if (mode == Waveform) { top = juce::Colour (0xff0e0b09); bot = juce::Colour (0xff040302); }
+    else if (mode == Waterfall) { top = juce::Colour (0xff100c0b); bot = juce::Colour (0xff040303); }
     g.setGradientFill (juce::ColourGradient (top, 0.0f, b.getY(), bot, 0.0f, b.getBottom(), false));
     g.fillRoundedRectangle (b, 10.0f);
 
+    // console bezel: thin border and bright corner brackets
+    g.setColour (MT::col::line.withAlpha (0.30f));
+    g.drawRoundedRectangle (b.reduced (0.5f), 10.0f, 1.0f);
+    g.setGradientFill (juce::ColourGradient (rampLo.withAlpha (0.85f), b.getX(), 0.0f, rampHi.withAlpha (0.85f), b.getRight(), 0.0f, false));
+    for (auto [bx, by, dx, dy] : { std::tuple<float, float, float, float> { b.getX() + 4.0f, b.getY() + 4.0f, 1.0f, 1.0f },
+                                   { b.getRight() - 4.0f, b.getY() + 4.0f, -1.0f, 1.0f },
+                                   { b.getX() + 4.0f, b.getBottom() - 4.0f, 1.0f, -1.0f },
+                                   { b.getRight() - 4.0f, b.getBottom() - 4.0f, -1.0f, -1.0f } })
+    {
+        g.fillRect (dx > 0 ? bx : bx - 14.0f, dy > 0 ? by : by - 2.0f, 14.0f, 2.0f);
+        g.fillRect (dx > 0 ? bx : bx - 2.0f, dy > 0 ? by : by - 14.0f, 2.0f, 14.0f);
+    }
+
     // mode dropdown pill
-    g.setColour (juce::Colour (0xff151927));
+    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff1d1713), 0.0f, modeRect.getY(), juce::Colour (0xff0e0b09), 0.0f, modeRect.getBottom(), false));
     g.fillRoundedRectangle (modeRect, 6.0f);
-    g.setColour (juce::Colours::white.withAlpha (0.16f));
+    g.setColour (MT::col::line.withAlpha (0.45f));
     g.drawRoundedRectangle (modeRect.reduced (0.5f), 6.0f, 1.0f);
-    g.setColour (juce::Colours::white.withAlpha (0.9f));
+    g.setColour (MT::col::ink);
     g.setFont (uiFont (9.5f, true));
     g.drawText (modeName (mode), modeRect.withTrimmedLeft (9.0f).withTrimmedRight (18.0f).toNearestInt(),
                 juce::Justification::centredLeft, false);
@@ -412,7 +425,7 @@ void SpectrumAnalyzer::buildStatic()
         caret.startNewSubPath (ax - 3.0f, cy - 1.5f);
         caret.lineTo (ax, cy + 1.5f);
         caret.lineTo (ax + 3.0f, cy - 1.5f);
-        g.setColour (juce::Colours::white.withAlpha (0.7f));
+        g.setColour (MT::col::ink);
         g.strokePath (caret, juce::PathStrokeType (1.4f));
     }
 
@@ -428,13 +441,13 @@ void SpectrumAnalyzer::buildStatic()
                 const float f = (float) (decade * m);
                 if (f < minF || f > maxF) continue;
                 const float x = std::round (xForFreq (f));
-                g.setColour (juce::Colours::white.withAlpha (m == 1 ? majorA : minorA));
+                g.setColour (MT::col::tick.withAlpha (m == 1 ? majorA : minorA));
                 g.fillRect (x, plot.getY(), 1.0f, plot.getHeight());
             }
     };
     auto freqLabels = [&] (float alpha)
     {
-        g.setColour (juce::Colours::white.withAlpha (alpha));
+        g.setColour (MT::col::tick.withAlpha (alpha));
         for (int i = 0; i < 8; ++i)
             g.drawText (labT[i], (int) xForFreq (labF[i]) - 16, (int) plot.getBottom() + 4, 32, 12,
                         juce::Justification::centred, false);
@@ -444,9 +457,9 @@ void SpectrumAnalyzer::buildStatic()
         for (int db = 0; db >= (int) botDb; db -= 12)
         {
             const float y = std::round (yForDb ((float) db));
-            g.setColour (juce::Colours::white.withAlpha (db == 0 ? alpha * 2.0f : alpha));
+            g.setColour (MT::col::tick.withAlpha (db == 0 ? alpha * 2.0f : alpha));
             g.fillRect (plot.getX(), y, plot.getWidth(), 1.0f);
-            g.setColour (juce::Colours::white.withAlpha (labelAlpha));
+            g.setColour (MT::col::tick.withAlpha (labelAlpha));
             g.drawText (juce::String (db), (int) plot.getRight() + 2, (int) y - 6, 26, 12, juce::Justification::centredLeft, false);
         }
     };
@@ -463,7 +476,7 @@ void SpectrumAnalyzer::buildStatic()
             logGrid (0.07f, 0.16f);
             dbGrid (0.10f, 0.45f);
             freqLabels (0.5f);
-            g.setColour (juce::Colours::white.withAlpha (0.12f));
+            g.setColour (MT::col::tick.withAlpha (0.12f));
             g.drawRect (plot, 1.0f);
             break;
 
@@ -476,7 +489,7 @@ void SpectrumAnalyzer::buildStatic()
                 const float y = plot.getBottom() - 6.0f - d * plot.getHeight() * 0.42f;
                 const float x0 = plot.getX() + plot.getWidth() * 0.20f * d;
                 const float x1 = x0 + plot.getWidth() * (1.0f - 0.22f * d);
-                g.setColour (juce::Colours::white.withAlpha (0.05f));
+                g.setColour (MT::col::tick.withAlpha (0.05f));
                 g.drawLine (x0, y, x1, y, 1.0f);
             }
             for (int i = 0; i < 8; ++i)
@@ -484,11 +497,11 @@ void SpectrumAnalyzer::buildStatic()
                 const float t = std::log (labF[i] / minF) / std::log (maxF / minF);
                 const float xf = plot.getX() + plot.getWidth() * t;
                 const float xb = plot.getX() + plot.getWidth() * 0.20f + plot.getWidth() * 0.78f * t;
-                g.setColour (juce::Colours::white.withAlpha (0.05f));
+                g.setColour (MT::col::tick.withAlpha (0.05f));
                 g.drawLine (xf, plot.getBottom() - 6.0f, xb, plot.getBottom() - 6.0f - plot.getHeight() * 0.42f, 1.0f);
             }
             freqLabels (0.35f);
-            g.setColour (juce::Colours::white.withAlpha (0.3f));
+            g.setColour (MT::col::tick.withAlpha (0.3f));
             g.drawText ("TIME", (int) plot.getRight() + 2, (int) (plot.getBottom() - plot.getHeight() * 0.45f), 28, 12,
                         juce::Justification::centredLeft, false);
             break;
@@ -521,9 +534,9 @@ void SpectrumAnalyzer::buildStatic()
                 for (int sgn : { -1, 1 })
                 {
                     const float y = std::round (cy + (float) sgn * off);
-                    g.setColour (juce::Colours::white.withAlpha (db == 0 ? 0.09f : 0.05f));
+                    g.setColour (MT::col::tick.withAlpha (db == 0 ? 0.09f : 0.05f));
                     g.fillRect (plot.getX(), y, plot.getWidth(), 1.0f);
-                    g.setColour (juce::Colours::white.withAlpha (0.32f));
+                    g.setColour (MT::col::tick.withAlpha (0.32f));
                     g.drawText (db == 0 ? juce::String ("0") : juce::String (db), (int) plot.getRight() + 2, (int) y - 6, 28, 12,
                                 juce::Justification::centredLeft, false);
                 }
@@ -533,9 +546,9 @@ void SpectrumAnalyzer::buildStatic()
             {
                 const float x = std::round (plot.getRight() - (float) sec * wavePxPerSec);
                 if (x < plot.getX()) break;
-                g.setColour (juce::Colours::white.withAlpha (0.06f));
+                g.setColour (MT::col::tick.withAlpha (0.06f));
                 g.fillRect (x, plot.getY(), 1.0f, plot.getHeight());
-                g.setColour (juce::Colours::white.withAlpha (0.35f));
+                g.setColour (MT::col::tick.withAlpha (0.35f));
                 g.drawText (sec == 0 ? juce::String ("NOW") : "-" + juce::String (sec) + "s", (int) x - 18, (int) plot.getBottom() + 4, 36, 12,
                             juce::Justification::centred, false);
             }
@@ -544,7 +557,7 @@ void SpectrumAnalyzer::buildStatic()
 
         case Spectrogram:
         {
-            g.setColour (juce::Colours::white.withAlpha (0.3f));
+            g.setColour (MT::col::tick.withAlpha (0.3f));
             g.drawText ("TIME", (int) plot.getX() + 4, (int) plot.getBottom() + 4, 60, 12, juce::Justification::centredLeft, false);
             g.drawText ("NOW", (int) plot.getRight() - 40, (int) plot.getBottom() + 4, 40, 12, juce::Justification::centredRight, false);
             break;
@@ -570,13 +583,10 @@ void SpectrumAnalyzer::paint (juce::Graphics& g)
     const auto b = getLocalBounds().toFloat();
 
     // title with status LED
-    g.setColour (accent.withAlpha (0.25f));
-    g.fillEllipse (b.getX() + 11.0f, b.getY() + 11.0f, 10.0f, 10.0f);
-    g.setColour (accent.brighter (0.4f));
-    g.fillEllipse (b.getX() + 13.5f, b.getY() + 13.5f, 5.0f, 5.0f);
-    g.setColour (accent);
+    MT::drawLed (g, juce::Rectangle<float> (5.0f, 5.0f).withCentre ({ b.getX() + 16.0f, b.getY() + 16.5f }), true, rampLo);
     g.setFont (uiFont (11.0f, true).withExtraKerningFactor (0.2f));
-    g.drawText ("ANALYZER", (int) b.getX() + 26, (int) b.getY() + 8, 120, 16, juce::Justification::left, false);
+    MT::glowTextRamp (g, "ANALYZER", juce::Rectangle<float> (b.getX() + 26.0f, b.getY() + 8.0f, 120.0f, 16.0f),
+                      juce::Justification::left, rampLo, rampHi, 0.25f);
 
     juce::Graphics::ScopedSaveState ss (g);
     g.reduceClipRegion (plot.toNearestInt().withTrimmedTop (-2));
@@ -607,7 +617,7 @@ void SpectrumAnalyzer::paintOverChildren (juce::Graphics& g)
 //==============================================================================
 void SpectrumAnalyzer::drawClassic (juce::Graphics& g)
 {
-    const juce::Colour inCol (0xff9aa3b8);
+    const juce::Colour inCol (0xffb3a493);
     if (showInput)
     {
         g.setColour (inCol.withAlpha (0.07f));
@@ -628,7 +638,7 @@ void SpectrumAnalyzer::drawClassic (juce::Graphics& g)
     g.setColour (accent.brighter (0.35f));
     g.strokePath (line, juce::PathStrokeType (1.4f));
 
-    g.setColour (juce::Colours::white.withAlpha (0.42f));
+    g.setColour (MT::col::tick.withAlpha (0.42f));
     g.strokePath (makePath (outPeak, false), juce::PathStrokeType (1.0f));
 
     // legend (IN toggles the input trace)
@@ -639,7 +649,7 @@ void SpectrumAnalyzer::drawClassic (juce::Graphics& g)
         g.setColour (c.withAlpha (on ? 1.0f : 0.25f));
         if (line_) g.fillRect (x, y + 6.0f, 9.0f, 1.5f);
         else       g.fillEllipse (x + 1.0f, y + 3.5f, 6.0f, 6.0f);
-        g.setColour (juce::Colours::white.withAlpha (on ? 0.6f : 0.22f));
+        g.setColour (MT::col::tick.withAlpha (on ? 0.6f : 0.22f));
         g.drawText (t, (int) x + 11, (int) y, 30, 13, juce::Justification::left, false);
     };
     item (legendIn.getX(),         inCol, "IN", false, showInput);
@@ -908,9 +918,9 @@ void SpectrumAnalyzer::drawSpectrogram (juce::Graphics& g)
     {
         const float t = std::log (fs[i] / minF) / std::log (maxF / minF);
         const float y = std::round (plot.getBottom() - t * plot.getHeight());
-        g.setColour (juce::Colours::white.withAlpha (0.18f));
+        g.setColour (MT::col::tick.withAlpha (0.18f));
         g.fillRect (plot.getX(), y, plot.getWidth(), 1.0f);
-        g.setColour (juce::Colours::white.withAlpha (0.75f));
+        g.setColour (MT::col::tick.withAlpha (0.75f));
         g.drawText (ft[i], (int) plot.getX() + 4, (int) y - 12, 30, 11, juce::Justification::left, false);
     }
 }
@@ -931,7 +941,7 @@ void SpectrumAnalyzer::drawRta (juce::Graphics& g, bool staticPart)
         for (int db = 0; db >= -72; db -= 12)
         {
             const float y = std::round (rtaY ((float) db));
-            g.setColour (juce::Colours::white.withAlpha (0.30f));
+            g.setColour (MT::col::tick.withAlpha (0.30f));
             g.drawText (juce::String (db), (int) plot.getRight() + 2, (int) y - 6, 26, 12, juce::Justification::centredLeft, false);
         }
         const char* lab[] = { "31", "63", "125", "250", "500", "1k", "2k", "4k", "8k", "16k" };
@@ -946,7 +956,7 @@ void SpectrumAnalyzer::drawRta (juce::Graphics& g, bool staticPart)
             }
             if (k % 3 == 1 && k / 3 < 10)
             {
-                g.setColour (juce::Colours::white.withAlpha (0.35f));
+                g.setColour (MT::col::tick.withAlpha (0.35f));
                 g.drawText (lab[k / 3], (int) col.getCentreX() - 14, (int) bottom + 4, 28, 12, juce::Justification::centred, false);
             }
         }
@@ -982,7 +992,7 @@ void SpectrumAnalyzer::drawHover (juce::Graphics& g, const std::array<float, num
     const float y = yForDb (db);
     const auto hc = mode == Cloud ? kCloudCol : accent;
 
-    g.setColour (juce::Colours::white.withAlpha (0.28f));
+    g.setColour (MT::col::tick.withAlpha (0.28f));
     g.fillRect (std::round (hoverX), plot.getY(), 1.0f, plot.getHeight());
     g.setColour (hc.brighter (0.5f));
     g.fillEllipse (hoverX - 3.0f, y - 3.0f, 6.0f, 6.0f);
@@ -1001,7 +1011,7 @@ void SpectrumAnalyzer::drawHover (juce::Graphics& g, const std::array<float, num
     g.fillRoundedRectangle (box, 4.0f);
     g.setColour (hc.withAlpha (0.5f));
     g.drawRoundedRectangle (box.reduced (0.5f), 4.0f, 1.0f);
-    g.setColour (juce::Colours::white.withAlpha (0.92f));
+    g.setColour (MT::col::tick.withAlpha (0.92f));
     g.setFont (uiFont (9.5f, true));
     g.drawText (txt, box.toNearestInt(), juce::Justification::centred, false);
 }
