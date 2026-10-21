@@ -121,35 +121,6 @@ inline void drawGlass (juce::Graphics& g, juce::Rectangle<float> r, float radius
     g.drawRoundedRectangle (r.expanded (1.0f), radius + 1.0f, 1.0f);
 }
 
-// Colour themes: one per knob colour, the original level-reactive hue shift, and the Potato-Kicker console palette.
-// "Console" is appended (not inserted) so themes saved in older sessions keep their index.
-struct Theme { const char* name; juce::uint32 argb; };   // argb == 0 -> reactive
-inline constexpr Theme kThemes[] =
-{
-    { "Reactive", 0 },
-    { "Azure",   0xff3ba7ff }, { "Lagoon",  0xff35d0c4 }, { "Lime",    0xffa8e05f }, { "Ice",     0xffa0e7ff },
-    { "Amber",   0xffffa63d }, { "Ember",   0xffff7a45 }, { "Magenta", 0xffff5cb8 }, { "Violet",  0xffb583ff },
-    { "Indigo",  0xff6c8cff }, { "Crimson", 0xffff5252 },
-    { "Console", 0xffff8a1e }
-};
-inline constexpr int kNumThemes = (int) (sizeof (kThemes) / sizeof (kThemes[0]));
-inline constexpr int kConsoleTheme = kNumThemes - 1;   // the default for new instances
-
-// Light ramp (start of travel -> end of travel) for a theme. Console is the Kicker orange -> yellow;
-// every other theme ramps from a deeper shade of its colour to a lighter one.
-inline void themeRamp (int index, juce::Colour& lo, juce::Colour& hi)
-{
-    if (index == kConsoleTheme || kThemes[index].argb == 0)
-    {
-        lo = col::orange;
-        hi = col::yellow;
-        return;
-    }
-    const juce::Colour c (kThemes[index].argb);
-    lo = c.darker (0.30f);
-    hi = c.brighter (0.40f);
-}
-
 class MagicLookAndFeel : public juce::LookAndFeel_V4
 {
 public:

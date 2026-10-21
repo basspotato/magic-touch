@@ -66,6 +66,12 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
     void mouseDown (const juce::MouseEvent&) override;
+    void mouseMove (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
 
 private:
     struct Particle { float x, y, speed, size, phase; };
@@ -82,12 +88,13 @@ private:
     void updateEqCurve();
     void stepPreset (int dir);
     void showPresetMenu();
-    void showThemeMenu();
-    void setTheme (int index, bool saveAsDefault);
-    void applyRamp (bool force);      // pushes the theme's light ramp to the knobs and panels
-    juce::Colour themeBase() const;   // the theme colour (current hue for "Reactive")
-    juce::Colour tinted (juce::Colour c, float amount) const;
-    juce::Colour liveAccent() const;  // theme colour reacting to the music (every theme)
+    juce::Colour liveAccent() const;  // Kicker orange reacting to the music
+    // Tone EQ display: hover readout, click/drag, wheel and double-click on the four fixed-frequency bands
+    juce::Rectangle<float> eqPlotRect() const;
+    int   eqBandAt (juce::Point<float> p, bool nodesOnly) const;
+    float eqBandDb (int band) const;
+    void  setEqBandDb (int band, float db);
+    float eqResponseDb (float freq);
 
     MagicTouchProcessor& proc;
     MT::MagicLookAndFeel laf;   // declared before the children so it outlives them
@@ -111,7 +118,6 @@ private:
     bool bgDirty = true;
     int bgPreset = -2;
     bool bgScHint = false;
-    float bgHue = -1.0f;
     double lastBgBuildMs = 0.0;
     double lastOutValue = 1.0e9;
 
@@ -120,13 +126,18 @@ private:
     std::array<juce::Point<float>, 4> eqNodes {};
     std::array<float, 4> eqCached { 99.0f, 99.0f, 99.0f, 99.0f };
 
-    // themes
-    int themeIndex = MT::kConsoleTheme;
-    juce::Colour rampLo, rampHi;   // light ramp of the current theme (Console: orange -> yellow)
-    std::unique_ptr<juce::PropertiesFile> settings;
+    // Potato-Kicker light ramp (start of travel -> end of travel)
+    const juce::Colour rampLo { MT::col::orange }, rampHi { MT::col::yellow };
+
+    // Tone EQ display interaction
+    std::array<juce::dsp::IIR::Coefficients<float>::Ptr, 4> eqCs;
+    int eqHover = -1, eqDrag = -1;
+    bool eqMouseIn = false;
+    juce::Point<float> eqMouse;
+    float eqLastY = 0.0f;
 
     // layout
-    juce::Rectangle<int>   topBar, presetRect, prevRect, nextRect, nameRect, tonePanel, dynPanel, themeRect, outTextRect,
+    juce::Rectangle<int>   topBar, presetRect, prevRect, nextRect, nameRect, tonePanel, dynPanel, outTextRect,
                            starRect, outValueRect, scHintRect;
     juce::Rectangle<float> displayRect, meterRect, meterResetRect;
 
@@ -144,7 +155,7 @@ private:
     double lastTickMs = 0.0;
 
     // reactive visuals
-    float level = 0.0f, bass = 0.0f, hue = 0.52f;
+    float level = 0.0f, bass = 0.0f;
     std::array<Particle, 48> particles {};
     juce::Random rng;
 

@@ -48,18 +48,19 @@ Resources/Fonts/        — Barlow Condensed, Share Tech Mono (binary data via j
 
 - The GUI is branded POTATO MAGIC (the plugin/product name is still Magic Touch).
 - Potato-Kicker "light-up console" style: near-black tiles with ramp borders, top light strip and corner brackets; glow text; Barlow Condensed labels, Share Tech Mono values.
-- Light ramp = orange -> yellow in the default "Console" theme (appended to the theme list so saved sessions keep their index); the other themes use a deeper -> lighter shade of their colour; "Reactive" follows the level hue.
-- Every colour theme is music-reactive. Themes are saved per instance and as the default for new instances.
+- Fixed Potato-Kicker palette (no theme picker): light ramp orange -> yellow. The aura, particles and panel rim lights still react to the music, in the same orange.
 - Knobs: Kicker lit knob (black glossy cap, backlit ring + ticks that light along the ramp as the value rises; bipolar knobs light from zero). Ramp colours come from the slider's rotarySliderFillColourId (start) / rotarySliderOutlineColourId (end). Knob cells are buffered to images, so the ring only re-renders when a knob moves or the ramp changes.
 - Faders: compressor = yellow, limiter = red, output = white; gradient fill intensifies with value.
 - Analyzer: dropdown with 6 display modes including scrolling Waveform.
 - RMS meter to the left of the sidechain meter.
+- Level meters fade orange (low) -> yellow -> red (top), per segment, by dB.
+- Tone EQ display is interactive: hover = crosshair + frequency/EQ readout, drag a band dot (Shift = fine) or click anywhere to move the nearest band's gain, double-click resets, wheel fine-tunes. Bands are fixed-frequency (Bass 90 Hz, Body 320 Hz, Presence 3.2 kHz, Air 11 kHz).
 
 ## Controls
 
 10 knobs (Tone & Colour): Bass, Body, Presence, Air, Tube, Tape, Exciter, Width, Bass Mono, Punch
 10 sliders (Dynamics & Output): Thresh, Ratio, Attack, Release, Blend, SC HPF, Loudness, Ceiling, Lim Rel, Dry/Wet
-Top bar: Theme picker, Output volume (−36 to +6 dB, double-click = 0 dB — applied after limiter, not changed by presets).
+Top bar: Output volume (−36 to +6 dB, double-click = 0 dB — applied after limiter, not changed by presets).
 
 ## Working rules
 
