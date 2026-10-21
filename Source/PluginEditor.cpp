@@ -696,7 +696,7 @@ void MagicTouchEditor::buildBackground()
     };
     group (0, 5, "GLUE COMPRESSOR", col::line, rampLo, rampHi);
     group (6, 8, "LIMITER",         col::line, rampLo, rampHi);
-    group (9, 9, "OUT",             kFaderColours[9], kFaderColours[9], kFaderColours[9]);   // the white output fader keeps its white label
+    group (9, 9, "OUT",             col::line, rampLo, rampHi);
 
     // dividing lines between the groups (compressor | limiter | out): a lit rule fading out at both ends, with an LED on each end
     auto divider = [&] (int lastOfLeftGroup)
