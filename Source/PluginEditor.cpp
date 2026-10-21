@@ -674,7 +674,7 @@ void MagicTouchEditor::buildBackground()
     }
 
     // group headers above the faders: a label with a thin rule either side, like the section titles
-    auto group = [&] (int a, int b, const juce::String& text, juce::Colour c)
+    auto group = [&] (int a, int b, const juce::String& text, juce::Colour c, juce::Colour lo, juce::Colour hi)
     {
         const float x0 = (float) faders[(size_t) a]->getX() + 6.0f;
         const float x1 = (float) faders[(size_t) b]->getRight() - 6.0f;
@@ -690,11 +690,13 @@ void MagicTouchEditor::buildBackground()
             g.fillRect (rt, cy, x1 - rt, 1.0f);
         }
         g.setFont (f);
-        glowText (g, text, juce::Rectangle<float> (l + 4.0f, cy - 7.0f, tw - 8.0f, 14.0f), juce::Justification::centred, c, 0.22f);
+        // the ramp spans exactly the text width, so the title runs the full orange -> yellow like the section headers
+        glowTextRamp (g, text, juce::Rectangle<float> (mid - (tw - 12.0f) * 0.5f, cy - 7.0f, tw - 12.0f, 14.0f),
+                      juce::Justification::centred, lo, hi, 0.25f);
     };
-    group (0, 5, "GLUE COMPRESSOR", kFaderColours[0]);
-    group (6, 8, "LIMITER", kFaderColours[6]);
-    group (9, 9, "OUT", kFaderColours[9]);
+    group (0, 5, "GLUE COMPRESSOR", col::line, rampLo, rampHi);
+    group (6, 8, "LIMITER",         col::line, rampLo, rampHi);
+    group (9, 9, "OUT",             kFaderColours[9], kFaderColours[9], kFaderColours[9]);   // the white output fader keeps its white label
 
     // dividing lines between the groups (compressor | limiter | out): a lit rule fading out at both ends, with an LED on each end
     auto divider = [&] (int lastOfLeftGroup)

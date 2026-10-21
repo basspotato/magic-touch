@@ -581,8 +581,11 @@ void SpectrumAnalyzer::paint (juce::Graphics& g)
 
     // title with status LED
     MT::drawLed (g, juce::Rectangle<float> (5.0f, 5.0f).withCentre ({ b.getX() + 16.0f, b.getY() + 16.5f }), true, rampLo);
-    g.setFont (uiFont (11.0f, true).withExtraKerningFactor (0.2f));
-    MT::glowTextRamp (g, "ANALYZER", juce::Rectangle<float> (b.getX() + 26.0f, b.getY() + 8.0f, 120.0f, 16.0f),
+    const auto titleFont = uiFont (11.0f, true).withExtraKerningFactor (0.2f);
+    g.setFont (titleFont);
+    // the ramp spans exactly the text width, so the title runs the full orange -> yellow like the section headers
+    MT::glowTextRamp (g, "ANALYZER", juce::Rectangle<float> (b.getX() + 26.0f, b.getY() + 8.0f,
+                                                             juce::GlyphArrangement::getStringWidth (titleFont, "ANALYZER") + 2.0f, 16.0f),
                       juce::Justification::left, rampLo, rampHi, 0.25f);
 
     juce::Graphics::ScopedSaveState ss (g);
